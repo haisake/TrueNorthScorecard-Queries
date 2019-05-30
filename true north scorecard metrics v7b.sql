@@ -2188,7 +2188,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	FROM #TNR_ID18
 	--add fake rows to populate summary page
 	UNION
-	SELECT TOP 1 '08', 'Richmond Hospital', 'Overall', '2020-05-02','2020-01','Fiscal Period','Discharges actual vs. predicted', NULL,NULL, NULL, 'Above','D1',NULL,'Placeholder',1,1, 'Exceptional Care'
+	SELECT TOP 1 '08', 'Richmond Hospital', 'Overall', '2020-05-30','2020-02','Fiscal Period','Discharges actual vs. predicted', NULL,NULL, NULL, 'Above','D1',NULL,'Placeholder',1,1, 'Exceptional Care'
 	FROM #TNR_ID01
 	;
 	GO
