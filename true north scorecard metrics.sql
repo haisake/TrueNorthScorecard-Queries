@@ -1113,7 +1113,7 @@ Comments:
 	, X.FiscalPeriodStartDate
 	, X.FiscalPeriodLong
 	, X.EntityDesc
-	, Y.LambertProgram 
+	, Y.LambertProgram
 	;
 	GO
 
@@ -1177,6 +1177,11 @@ Comments:
 	--remove these breakdowns so they don't show up in the report; In real terms this is the Temporary Bed Unit taht was on R6N but it was paid under an unallocated cost center
 	--we can't possibly account for this in automated report as it requires to much investigation.
 	DELETE FROM #TNR_ID10 WHERE Program='RHS COO Unallocated';
+	GO
+
+	--only unallocated can have 0 days legitimately
+	DELETE FROM #TNR_ID10 WHERE program not like  '%Unallocated%' AND Numerator=0	--records are too early
+	;
 	GO
 
 -----------------------------------------------
