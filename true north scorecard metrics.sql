@@ -102,8 +102,8 @@ Comments:
 		GO
 
 		SELECT D.FiscalYearLong, D.FiscalPeriod, D.FiscalPeriodLong, D.FiscalPeriodStartDate, D.FiscalPeriodEndDate,  cc.CostCenterCode, ledger.FinSiteID, P.EntityDesc
-		, ISNULL(sum(ledger.BudgetAmt), 0.00) as 'BudgetedCensusDays'
-		, ISNULL(sum(ledger.ActualAmt),0.00) as 'ActualCensusDays'
+		, ISNULL(sum(ledger.BudgetAmt), 0.00) as 'BudgetedCensusDays'	--historical periods don't have values recorded so they are 0. Future records are not actually 0 untill some date. This is because the budget extends into the future
+		, ISNULL(sum(ledger.ActualAmt),0.00) as 'ActualCensusDays'		--historical periods don't have values recorded so they are 0 Future records are not actually 0 untill some date. This is because the budget extends into the future
 		INTO #tnr_inpatientDaysByCC
 		FROM FinanceMart.Finance.GLAccountStatsFact as ledger
 		LEFT JOIN FinanceMart.dim.CostCenter as CC
@@ -1829,6 +1829,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, h.ProgramDesc
 	, h.FiscalPeriodEndDate
 	, h.FiscalPeriodLong
+	HAVING SUM(ip.ActualCensusDays) >0	--exclude all records with 0 inpatient days
 	--add overall
 	UNION
 	SELECT '15' as 'IndicatorID'
@@ -1857,8 +1858,10 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	GROUP BY h.EntityDesc
 	, h.FiscalPeriodEndDate
 	, h.FiscalPeriodLong
+	HAVING SUM(ip.ActualCensusDays) >0	--exclude all records with 0 inpatient days
 	;
 
+	SELECT * FROM #Tnr_ID15 order by TimeFrameLabel DESC
 -----------------------------------------------
 -- ID16 Percent of surgical Patients Treated Within Target Wait Time
 -----------------------------------------------
