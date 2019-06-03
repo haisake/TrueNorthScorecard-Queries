@@ -1861,7 +1861,6 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	HAVING SUM(ip.ActualCensusDays) >0	--exclude all records with 0 inpatient days
 	;
 
-	SELECT * FROM #Tnr_ID15 order by TimeFrameLabel DESC
 -----------------------------------------------
 -- ID16 Percent of surgical Patients Treated Within Target Wait Time
 -----------------------------------------------
