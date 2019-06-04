@@ -530,6 +530,7 @@ Comments:
 	, LOS as 'Inpatient_Days'					--this inptient days is different from waht I computed in the other indicators
 	, Visits as 'Visits'
 	, 1.0*LOS/Visits as 'ALOS'
+	, Budget
 	INTO #TNR_financeALOS_04
 	FROM [FinanceMart].[LOS].[ALOSPeriodicReport] as F
 	INNER JOIN #TNR_FPReportTF as D		
@@ -556,7 +557,7 @@ Comments:
 	, 1.0*Inpatient_Days/Visits as 'Value'
 	, 'Below' as 'DesiredDirection'
 	, 'D1' as 'Format'
-	,  NULL as 'Target'
+	,  Budget as 'Target'
 	, 'FinaceMart-ALOS Periodic Report' as 'DataSource'
 	, CASE WHEN Program = 'Overall' THEN 1
 		   ELSE 0
@@ -1187,6 +1188,7 @@ Comments:
 -----------------------------------------------
 -- ID11 Beds occupied as a % of budgeted bed capacity (excl. Mental Health, ED ,DTU, PAR, Periop) 
 -----------------------------------------------
+
 	--a finance mart based definition; doesn't agree with the historical vancouver extract likely because of labels.
 	IF OBJECT_ID('tempdb.dbo.#TNR_ID11') IS NOT NULL DROP TABLE #TNR_ID11;
 	GO
@@ -1203,7 +1205,7 @@ Comments:
 	, 1.0*ActualCensusDays/ IIF(BudgetedCensusDays =0, 1, BudgetedCensusDays ) as 'Value'
 	, 'Below' as 'DesiredDirection'
 	, 'P1' as 'Format'
-	,  NULL as 'Target'
+	, 1.00 as 'Target'
 	, 'FinanceMart' as 'DataSource'	--Lamberts groupings
 	, 0 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
@@ -1225,7 +1227,7 @@ Comments:
 	, 1.0*SUM(ActualCensusDays)/ IIF(SUM(BudgetedCensusDays) =0, 1, SUM(BudgetedCensusDays) ) as 'Value'
 	, 'Below' as 'DesiredDirection'
 	, 'P1' as 'Format'
-	,  NULL as 'Target'
+	,  1.00 as 'Target'
 	, 'FinanceMart' as 'DataSource'	--Lamberts groupings
 	, 0 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
@@ -1982,6 +1984,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	;
 	GO
 
+
 -----------------------------------------------
 -- ID17 Direct Discharges From ED
 -----------------------------------------------
@@ -2221,7 +2224,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	FROM #TNR_ID01
 	;
 	GO
-	
+
 	--most recent values
 	--IF OBJECT_ID('tempdb.dbo.#mostRecent') is not null DROP TABLE #mostRecent;
 	--GO
@@ -2246,7 +2249,6 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	--OR  X.indicatorID in ('08')
 	--WHERE X.Program not in ('Unknown')
 	----ORDER BY IndicatorID ASC, TimeFrame DESC
-
 
 
 ------------
