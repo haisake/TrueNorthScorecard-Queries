@@ -1241,6 +1241,11 @@ Comments:
 	DELETE FROM #TNR_ID11 WHERE Program='RHS COO Unallocated';
 	GO
 
+	--only unallocated can have 0 beds occupied legitimately
+	DELETE FROM #TNR_ID11 WHERE program not like  '%Unallocated%' AND Numerator=0	--records are too early
+	;
+	GO
+
 --------------------------------------
 -- ID12 OT rate (hr based)
 ---------------------------------------
@@ -1442,6 +1447,11 @@ Comments:
 	GROUP BY EntityDesc
 	, D.FiscalPeriodEndDate
 	, D.FiscalPeriodLong
+	;
+	GO
+
+	--only unallocated can have 0 beds occupied legitimately
+	DELETE FROM #TNR_ID12 WHERE program not like  '%Unallocated%' AND Numerator=0	--records are too early
 	;
 	GO
 
@@ -1655,6 +1665,11 @@ Comments:
 	;
 	GO
 
+	--only unallocated can have 0 beds occupied legitimately
+	DELETE FROM #TNR_ID13 WHERE program not like  '%Unallocated%' AND Numerator=0	--records are too early
+	;
+	GO
+
 -----------------------------------------------
 -- ID14 Net Surplus/Deficit Variance (in 000's)
 -----------------------------------------------
@@ -1765,6 +1780,11 @@ Comments:
 	, FiscalPeriodLong
 	;
 	GO
+
+	
+	--identifies records that are pulled in too early. It is not realistic to have 0 revenue and expenses except for special programs.
+	DELETE FROM #TNR_ID14 WHERE Numerator =0 AND Denominator=0 AND program not like '%Unallocated%';
+	GO
 	
 	--to get YTD for 2019
 	--SELECT Program
@@ -1834,7 +1854,6 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, h.ProgramDesc
 	, h.FiscalPeriodEndDate
 	, h.FiscalPeriodLong
-	HAVING SUM(ip.ActualCensusDays) >0	--exclude all records with 0 inpatient days
 	--add overall
 	UNION
 	SELECT '15' as 'IndicatorID'
@@ -1863,8 +1882,11 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	GROUP BY h.EntityDesc
 	, h.FiscalPeriodEndDate
 	, h.FiscalPeriodLong
-	HAVING SUM(ip.ActualCensusDays) >0	--exclude all records with 0 inpatient days
 	;
+
+	--identifies records that are pulled in too early. It is not realistic to have 0 revenue and expenses except for special programs.
+	DELETE FROM #TNR_ID15 WHERE Denominator=0 AND program not like '%Unallocated%';
+	GO
 
 -----------------------------------------------
 -- ID16 Percent of surgical Patients Treated Within Target Wait Time
