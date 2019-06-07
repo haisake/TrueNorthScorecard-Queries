@@ -1,6 +1,6 @@
 /*
 Purpose: To create a consolidated query that constructs the indciators for the true north richmond scorecard
-Author: Hans Aisake
+Author: Nayef did this amazing stuff. Hans helped like maybe a little. 
 Date Created: April 1, 2019
 Date Modified: April 29, 2019
 Inclusions/Exclusions:
