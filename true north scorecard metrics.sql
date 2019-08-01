@@ -86,8 +86,6 @@ DSSI.dbo.RollingFiscalYear
 	ORDER BY FiscalPeriodEndDate DESC
 	;
 	GO
-
-	SELECT * FROM #TNR_FPReportTF
 	
 ---------------------------------------------------
 --Finance Data from the General Ledger - April 2019
