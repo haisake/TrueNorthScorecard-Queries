@@ -5,6 +5,8 @@ Date Created: April 1, 2019
 Date Modified: April 29, 2019
 Inclusions/Exclusions:
 Comments:
+
+DSSI.dbo.RollingFiscalYear
 */ 
 
 ------------------------
@@ -84,6 +86,8 @@ Comments:
 	ORDER BY FiscalPeriodEndDate DESC
 	;
 	GO
+
+	SELECT * FROM #TNR_FPReportTF
 	
 ---------------------------------------------------
 --Finance Data from the General Ledger - April 2019
@@ -794,7 +798,7 @@ Comments:
 	, sum(LLOSDays) as 'Value'
 	, 'Below' as 'DesiredDirection'
 	, 'D0' as 'Format'
-	, NULL as 'Target'
+	, NULL as 'Target' --based on last 3 years of targets / 13 to be added
 	, 'ADTCMart' as 'DataSource'
 	, 0 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
@@ -862,6 +866,37 @@ Comments:
 	AND I.[Value] is NULL
 	;
 
+	--set targets AVG of last 3 FY; TNSC 201904-08_TNS.Targets.xksx
+	--BSC says the same thing but the definition iplies for the same YTD time range I think
+	--compute and store metric
+	IF OBJECT_ID('tempdb.dbo.#TNR_ID06_targets') IS NOT NULL DROP TABLE #TNR_ID06_targets;
+	GO
+
+	SELECT X.TimeFrameLabel
+	, X.Facility
+	, X.Program
+	, AVG( Y.[Value] ) as 'Target'
+	INTO #TNR_ID06_targets
+	FROM #TNR_ID06 as X
+	LEFT JOIN #TNR_ID06 as Y
+	ON  CAST( LEFT(Y.TimeFrameLabel,4)  as int) BETWEEN CAST( LEFT(X.TimeFrameLabel,4) as int)-2 AND CAST( LEFT(X.TimeFrameLabel,4) as int)	--last 3 fiscal years
+	AND RIGHT(X.TimeFrameLabel,2)=RIGHT(Y.TimeFrameLabel,2)	--same period
+	AND X.Facility=Y.Facility	--same site
+	AND X.Program=Y.Program	--same program
+	GROUP BY X.TimeFrameLabel
+	, X.Facility
+	, X.Program
+
+	--add targets to the table
+	UPDATE X
+	SET X.[Target] = Y.[Target]
+	FROM #TNR_ID06 as X LEFT JOIN #TNR_ID06_targets as Y
+	ON X.Facility=Y.Facility
+	AND X.Program=Y.Program
+	AND X.TimeFrameLAbel=Y.TimeFrameLabel
+	WHERE Y.[Target] is not null
+	;
+
 -----------------------------------------------
 -- ID07 ALC rate Discharge Based Excluding NewBorns
 -----------------------------------------------
@@ -922,6 +957,26 @@ Comments:
 	;
 	GO
 
+	--ALC targets for richmond overall from BSI to match BSC, will apply to all programs
+	IF OBJECT_ID('tempdb.dbo.#TNR_ID07_targets') IS NOT NULL DROP TABLE #TNR_ID07_targets;
+	GO
+
+	SELECT LEFT(FullFiscalYear,2)+RIGHT(FullFiscalYear,2) as 'FiscalYear'
+	, CASE WHEN EntityIndicatorID = 35 THEN 'Richmond Hospital'
+		   WHEN EntityIndicatorID = 34 THEN 'Vancouver General Hospital'
+		   WHEN EntityIndicatorID = 33 THEN 'Overall'
+		   ELSE 'Unmapped'
+	END as 'Facility'
+	, [FY_YTD] as 'Target'
+	INTO #TNR_ID07_targets
+	FROM BSI.[BSI].[IndicatorSummaryFact] 
+	WHERE indicatorID=5		--ALC indicator on BSC as of 20190801
+	and EntityIndicatorID=35 --richmond overall
+	and FactDataRowTypeID=2 --target data
+	AND [FY_YTD]  is not null
+	;
+	GO
+
 	--compute and store metric
 	IF OBJECT_ID('tempdb.dbo.#TNR_ID07') IS NOT NULL DROP TABLE #TNR_ID07;
 	GO
@@ -938,11 +993,12 @@ Comments:
 	, 1.0*SUM(Y.ALC_Days)/SUM(Y.Census_Days) as 'Value'
 	, 'Below' as 'DesiredDirection'
 	, 'P0' as 'Format'
-	, CASE WHEN X.FiscalPeriodEndDate between '4/1/2013' and '3/31/2014' THEN 0.099
-		  WHEN X.FiscalPeriodEndDate between '4/1/2014' and '3/31/2015' THEN 0.11
-		  WHEN X.FiscalPeriodEndDate between '4/1/2015' and '3/31/2016' THEN 0.115
-		  ELSE 0.115 
-	END as 'Target'
+	--, CASE WHEN X.FiscalPeriodEndDate between '4/1/2013' and '3/31/2014' THEN 0.099
+	--	   WHEN X.FiscalPeriodEndDate between '4/1/2014' and '3/31/2015' THEN 0.11
+	--	   WHEN X.FiscalPeriodEndDate between '4/1/2015' and '3/31/2016' THEN 0.115
+	--	   ELSE 0.115 
+	--END 
+	, NULL as 'Target'
 	, 'ADTCMart' as 'DataSource'
 	, 0 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
@@ -969,11 +1025,12 @@ Comments:
 	, 1.0*SUM(Y.ALC_Days)/SUM(Y.Census_Days) as 'Value'
 	, 'Below' as 'DesiredDirection'
 	, 'P0' as 'Format'
-	, CASE WHEN X.FiscalPeriodEndDate between '4/1/2013' and '3/31/2014' THEN 0.099
-		   WHEN X.FiscalPeriodEndDate between '4/1/2014' and '3/31/2015' THEN 0.11
-		   WHEN X.FiscalPeriodEndDate between '4/1/2015' and '3/31/2016' THEN 0.115
-		   ELSE 0.115 
-	END as 'Target'
+	--, CASE WHEN X.FiscalPeriodEndDate between '4/1/2013' and '3/31/2014' THEN 0.099
+	--	   WHEN X.FiscalPeriodEndDate between '4/1/2014' and '3/31/2015' THEN 0.11
+	--	   WHEN X.FiscalPeriodEndDate between '4/1/2015' and '3/31/2016' THEN 0.115
+	--	   ELSE 0.115 
+	--END 
+	, NULL as 'Target'
 	, 'ADTCMart' as 'DataSource'
 	, 1 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
@@ -984,6 +1041,17 @@ Comments:
 	GROUP BY X.FiscalPeriodLong
 	, X.FiscalPeriodEndDate
 	, X.DischargeFacilityLongName
+	;
+	GO
+
+	-- update targets
+	UPDATE X
+	SET X.[Target] = Y.[Target]
+	FROM #TNR_ID07 as X
+	INNER JOIN #TNR_ID07_targets as Y
+	ON X.Facility=Y.Facility	--same facility
+	AND LEFT(X.TimeFrameLabel,4) = Y.FiscalYear --same fiscal year
+	--AND X.Program=Y.Program	; no program in BSI apply blanket rate target to all services
 	;
 	GO
 
