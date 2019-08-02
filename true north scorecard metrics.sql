@@ -648,7 +648,16 @@ DSSI.dbo.RollingFiscalYear
 	, SUM(LLOSDays) as 'Value'
 	 , 'Below' as 'DesiredDirection'
 	, 'D0' as 'Format'
-	, NULL as 'Target'
+	--, CASE WHEN FiscalPeriodEndDate BETWEEN '2012-04-01' AND '2013-03-31' THEN 1697
+	--	   WHEN FiscalPeriodEndDate BETWEEN '2013-04-01' AND '2014-03-31' THEN 1697
+	--	   WHEN FiscalPeriodEndDate BETWEEN '2014-04-01' AND '2015-03-31' THEN 1432
+	--	   WHEN FiscalPeriodEndDate BETWEEN '2015-04-01' AND '2016-03-31' THEN 1454
+	--	   WHEN FiscalPeriodEndDate BETWEEN '2016-04-01' AND '2017-03-31' THEN 1381
+	--	   WHEN FiscalPeriodEndDate BETWEEN '2017-04-01' AND '2018-03-31' THEN 1376
+	--	   WHEN FiscalPeriodEndDate BETWEEN '2018-04-01' AND '2019-03-31' THEN 1637 
+	--	   ELSE NULL
+	--END as 'Target'
+	, CAST(NULL as float) as 'Target'
 	, 'ADTCMart' as 'DataSource'
 	, 0 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
@@ -673,15 +682,16 @@ DSSI.dbo.RollingFiscalYear
 	, SUM(LLOSDays) as 'Value'
 	, 'Below' as 'DesiredDirection'
 	, 'D0' as 'Format'
-	, CASE WHEN FiscalPeriodEndDate BETWEEN '2012-04-01' AND '2013-03-31' THEN 1697
-		   WHEN FiscalPeriodEndDate BETWEEN '2013-04-01' AND '2014-03-31' THEN 1697
-		   WHEN FiscalPeriodEndDate BETWEEN '2014-04-01' AND '2015-03-31' THEN 1432
-		   WHEN FiscalPeriodEndDate BETWEEN '2015-04-01' AND '2016-03-31' THEN 1454
-		   WHEN FiscalPeriodEndDate BETWEEN '2016-04-01' AND '2017-03-31' THEN 1381
-		   WHEN FiscalPeriodEndDate BETWEEN '2017-04-01' AND '2018-03-31' THEN 1376
-		   WHEN FiscalPeriodEndDate BETWEEN '2018-04-01' AND '2019-03-31' THEN 1637 
-		   ELSE NULL
-	END as 'Target'
+	--, CASE WHEN FiscalPeriodEndDate BETWEEN '2012-04-01' AND '2013-03-31' THEN 1697
+	--	   WHEN FiscalPeriodEndDate BETWEEN '2013-04-01' AND '2014-03-31' THEN 1697
+	--	   WHEN FiscalPeriodEndDate BETWEEN '2014-04-01' AND '2015-03-31' THEN 1432
+	--	   WHEN FiscalPeriodEndDate BETWEEN '2015-04-01' AND '2016-03-31' THEN 1454
+	--	   WHEN FiscalPeriodEndDate BETWEEN '2016-04-01' AND '2017-03-31' THEN 1381
+	--	   WHEN FiscalPeriodEndDate BETWEEN '2017-04-01' AND '2018-03-31' THEN 1376
+	--	   WHEN FiscalPeriodEndDate BETWEEN '2018-04-01' AND '2019-03-31' THEN 1637 
+	--	   ELSE NULL
+	--END as 'Target'
+	, CAST(NULL as float) as 'Target'
 	, 'ADTCMart' as 'DataSource'
 	, 1 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
@@ -711,15 +721,16 @@ DSSI.dbo.RollingFiscalYear
 	, 0 as 'Value'	--proper 0's
 	, 'Below' as 'DesiredDirection'
 	, 'D0' as 'Format'
-	, CASE WHEN P.timeFrame BETWEEN '2012-04-01' AND '2013-03-31' and P.Program ='Overall' THEN 1697
-		   WHEN P.timeFrame BETWEEN '2013-04-01' AND '2014-03-31' and P.Program ='Overall' THEN 1697
-		   WHEN P.timeFrame BETWEEN '2014-04-01' AND '2015-03-31' and P.Program ='Overall' THEN 1432
-		   WHEN P.timeFrame BETWEEN '2015-04-01' AND '2016-03-31' and P.Program ='Overall' THEN 1454
-		   WHEN P.timeFrame BETWEEN '2016-04-01' AND '2017-03-31' and P.Program ='Overall' THEN 1381
-		   WHEN P.timeFrame BETWEEN '2017-04-01' AND '2018-03-31' and P.Program ='Overall' THEN 1376
-		   WHEN P.timeFrame BETWEEN '2018-04-01' AND '2019-03-31' and P.Program ='Overall' THEN 1637 
-		   ELSE NULL
-	END as 'Target'
+	--, CASE WHEN P.timeFrame BETWEEN '2012-04-01' AND '2013-03-31' and P.Program ='Overall' THEN 1697
+	--	   WHEN P.timeFrame BETWEEN '2013-04-01' AND '2014-03-31' and P.Program ='Overall' THEN 1697
+	--	   WHEN P.timeFrame BETWEEN '2014-04-01' AND '2015-03-31' and P.Program ='Overall' THEN 1432
+	--	   WHEN P.timeFrame BETWEEN '2015-04-01' AND '2016-03-31' and P.Program ='Overall' THEN 1454
+	--	   WHEN P.timeFrame BETWEEN '2016-04-01' AND '2017-03-31' and P.Program ='Overall' THEN 1381
+	--	   WHEN P.timeFrame BETWEEN '2017-04-01' AND '2018-03-31' and P.Program ='Overall' THEN 1376
+	--	   WHEN P.timeFrame BETWEEN '2018-04-01' AND '2019-03-31' and P.Program ='Overall' THEN 1637 
+	--	   ELSE NULL
+	--END as 'Target'
+	, CAST(NULL as float) as 'Target'
 	, 'ADTCMart' as 'DataSource'
 	, CASE WHEN P.Program ='Overall' THEN 1 ELSE 0 END as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
@@ -734,6 +745,38 @@ DSSI.dbo.RollingFiscalYear
 	AND I.[Value] is NULL
 	;
 	GO
+
+	--set targets AVG of last 3 FY; TNSC 201904-08_TNS.Targets.xksx
+	--BSC says the same thing but the definition iplies for the same YTD time range, so in this case it would be last 3 years same fiscal periods
+	--compute and store metric
+	IF OBJECT_ID('tempdb.dbo.#TNR_ID05_targets') IS NOT NULL DROP TABLE #TNR_ID05_targets;
+	GO
+
+	SELECT X.TimeFrameLabel
+	, X.Facility
+	, X.Program
+	, AVG( Y.[Value] ) as 'Target'
+	INTO #TNR_ID05_targets
+	FROM #TNR_ID05 as X
+	LEFT JOIN #TNR_ID05 as Y
+	ON  CAST( LEFT(Y.TimeFrameLabel,4)  as int) -1 BETWEEN CAST( LEFT(X.TimeFrameLabel,4) as int)-2 AND CAST( LEFT(X.TimeFrameLabel,4) as int)	--last 3 fiscal years not including current
+	AND RIGHT(X.TimeFrameLabel,2)=RIGHT(Y.TimeFrameLabel,2)	--same period
+	AND X.Facility=Y.Facility	--same site
+	AND X.Program=Y.Program	--same program
+	GROUP BY X.TimeFrameLabel
+	, X.Facility
+	, X.Program
+
+	--add targets to the table
+	UPDATE X
+	SET X.[Target] = Y.[Target]
+	FROM #TNR_ID05 as X INNER JOIN #TNR_ID05_targets as Y
+	ON X.Facility=Y.Facility
+	AND X.Program=Y.Program
+	AND X.TimeFrameLAbel=Y.TimeFrameLabel
+	WHERE Y.[Target] is not null
+	;
+
 		
 -----------------------------------------------
 -- ID06 Discharged Long Length of Stay (> 30 days) patient days excludes newborns
@@ -877,7 +920,7 @@ DSSI.dbo.RollingFiscalYear
 	INTO #TNR_ID06_targets
 	FROM #TNR_ID06 as X
 	LEFT JOIN #TNR_ID06 as Y
-	ON  CAST( LEFT(Y.TimeFrameLabel,4)  as int) BETWEEN CAST( LEFT(X.TimeFrameLabel,4) as int)-2 AND CAST( LEFT(X.TimeFrameLabel,4) as int)	--last 3 fiscal years
+	ON  CAST( LEFT(Y.TimeFrameLabel,4)  as int) -1 BETWEEN CAST( LEFT(X.TimeFrameLabel,4) as int)-2 AND CAST( LEFT(X.TimeFrameLabel,4) as int)	--last 3 fiscal years not including current
 	AND RIGHT(X.TimeFrameLabel,2)=RIGHT(Y.TimeFrameLabel,2)	--same period
 	AND X.Facility=Y.Facility	--same site
 	AND X.Program=Y.Program	--same program
@@ -955,26 +998,6 @@ DSSI.dbo.RollingFiscalYear
 	;
 	GO
 
-	--ALC targets for richmond overall from BSI to match BSC, will apply to all programs
-	IF OBJECT_ID('tempdb.dbo.#TNR_ID07_targets') IS NOT NULL DROP TABLE #TNR_ID07_targets;
-	GO
-
-	SELECT LEFT(FullFiscalYear,2)+RIGHT(FullFiscalYear,2) as 'FiscalYear'
-	, CASE WHEN EntityIndicatorID = 35 THEN 'Richmond Hospital'
-		   WHEN EntityIndicatorID = 34 THEN 'Vancouver General Hospital'
-		   WHEN EntityIndicatorID = 33 THEN 'Overall'
-		   ELSE 'Unmapped'
-	END as 'Facility'
-	, [FY_YTD] as 'Target'
-	INTO #TNR_ID07_targets
-	FROM BSI.[BSI].[IndicatorSummaryFact] 
-	WHERE indicatorID=5		--ALC indicator on BSC as of 20190801
-	and EntityIndicatorID=35 --richmond overall
-	and FactDataRowTypeID=2 --target data
-	AND [FY_YTD]  is not null
-	;
-	GO
-
 	--compute and store metric
 	IF OBJECT_ID('tempdb.dbo.#TNR_ID07') IS NOT NULL DROP TABLE #TNR_ID07;
 	GO
@@ -996,7 +1019,7 @@ DSSI.dbo.RollingFiscalYear
 	--	   WHEN X.FiscalPeriodEndDate between '4/1/2015' and '3/31/2016' THEN 0.115
 	--	   ELSE 0.115 
 	--END 
-	, NULL as 'Target'
+	, CAST(NULL as float) as 'Target'
 	, 'ADTCMart' as 'DataSource'
 	, 0 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
@@ -1028,7 +1051,7 @@ DSSI.dbo.RollingFiscalYear
 	--	   WHEN X.FiscalPeriodEndDate between '4/1/2015' and '3/31/2016' THEN 0.115
 	--	   ELSE 0.115 
 	--END 
-	, NULL as 'Target'
+	, CAST(NULL as float) as 'Target'
 	, 'ADTCMart' as 'DataSource'
 	, 1 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
@@ -1042,9 +1065,29 @@ DSSI.dbo.RollingFiscalYear
 	;
 	GO
 
+		--ALC targets for richmond overall from BSI to match BSC, will apply to all programs
+	IF OBJECT_ID('tempdb.dbo.#TNR_ID07_targets') IS NOT NULL DROP TABLE #TNR_ID07_targets;
+	GO
+
+	SELECT LEFT(FullFiscalYear,2)+RIGHT(FullFiscalYear,2) as 'FiscalYear'
+	, CASE WHEN EntityIndicatorID = 35 THEN 'Richmond Hospital'
+		   WHEN EntityIndicatorID = 34 THEN 'Vancouver General Hospital'
+		   WHEN EntityIndicatorID = 33 THEN 'Overall'
+		   ELSE 'Unmapped'
+	END as 'Facility'
+	, [FY_YTD]/100 as 'Target'
+	INTO #TNR_ID07_targets
+	FROM BSI.[BSI].[IndicatorSummaryFact] 
+	WHERE indicatorID=5		--ALC indicator on BSC as of 20190801
+	and EntityIndicatorID=35 --richmond overall
+	and FactDataRowTypeID=2 --target data
+	AND [FY_YTD]  is not null
+	;
+	GO
+
 	-- update targets
 	UPDATE X
-	SET X.[Target] = Y.[Target]
+	SET [Target] = Y.[Target]
 	FROM #TNR_ID07 as X
 	INNER JOIN #TNR_ID07_targets as Y
 	ON X.Facility=Y.Facility	--same facility
@@ -1154,6 +1197,35 @@ DSSI.dbo.RollingFiscalYear
 	, IndicatorName
 	;
 	GO
+
+	--compute traget using last year as a baseline average
+	IF OBJECT_ID('tempdb.dbo.#TNR_ID09_targets') is not null DROP TABLE #TNR_ID09_targets;
+	GO
+
+	SELECT LEFT(TimeFrameLabel,4) as 'FiscalYear'
+	, Facility
+	, Program
+	, AVG(Value) as 'Target'
+	INTO #TNR_ID09_targets
+	FROM #TNR_ID09
+	GROUP BY LEFT(TimeFrameLabel,4)
+	, Facility
+	, Program
+	;
+	GO
+
+	-- update targets
+	UPDATE X
+	SET X.[Target] = Y.[Target]
+	FROM #TNR_ID09 as X
+	INNER JOIN #TNR_ID09_targets as Y
+	ON X.Facility=Y.Facility	--same facility
+	AND X.Program=Y.Program		--same program
+	AND CAST(LEFT(X.TimeFrameLabel,4) as int) = CAST(Y.FiscalYear as int) +1 --last fiscal year
+	WHERE Y.[Target] is not null
+	;
+	GO
+
 
 -----------------------------------------------
 -- ID10 Number of Beds Occupied (excl. Mental Health, ED, DTU, PAR, Periops)   --- currently Average Census
@@ -2286,7 +2358,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	FROM #TNR_ID18
 	--add fake rows to populate summary page
 	UNION
-	SELECT TOP 1 '08', 'Richmond Hospital', 'Overall', '2020-05-30','2020-02','Fiscal Period','Discharges actual vs. predicted', NULL,NULL, NULL, 'Above','D1',NULL,'Placeholder',1,1, 'Exceptional Care'
+	SELECT TOP 1 '08', 'Richmond Hospital', 'Overall', '2020-07-25','2020-04','Fiscal Period','Discharges actual vs. predicted', NULL,NULL, NULL, 'Above','D1',NULL,'Placeholder',1,1, 'Exceptional Care'
 	FROM #TNR_ID01
 	;
 	GO
