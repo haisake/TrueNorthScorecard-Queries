@@ -224,6 +224,9 @@ DSSI.dbo.RollingFiscalYear
 	Date Updated: 
 	Inclusions/Exclusions:
 	Comments:
+		Unkown program is when patients are admitted but they never arrive at an inpatient unit and become DDFEs.
+		It is included in the overall, but cannot be allocated to any program.
+
 	*/
 
 	--preprocess ED data and identify reporting time frames
@@ -327,6 +330,8 @@ DSSI.dbo.RollingFiscalYear
 	Date Updated: 
 	Inclusions/Exclusions:
 	Comments:
+		Unkown program is when patients are admitted but they never arrive at an inpatient unit and become DDFEs.
+		It is included in the overall, but cannot be allocated to any program.
 	*/
 
 	--preprocess ED data and identify reporting time frames
@@ -377,9 +382,9 @@ DSSI.dbo.RollingFiscalYear
 	, sum([EDP_AdmitMissedTarget60min]) as 'Numerator'
 	, count(*) as 'Denominator'
 	, 1.0*sum([EDP_AdmitMissedTarget60min])/count(*) as 'Value'
-	, 'Above' as 'DesiredDirection'
+	, 'Below' as 'DesiredDirection'
 	, 'P1' as 'Format'
-	,  NULL as 'Target'
+	,  CAST(NULL as float) as 'Target'
 	, 'EDMart' as 'DataSource'
 	, 0 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
@@ -402,9 +407,9 @@ DSSI.dbo.RollingFiscalYear
 	, sum([EDP_AdmitMissedTarget60min]) as 'Numerator'
 	, count(*) as 'Denominator'
 	, 1.0*sum([EDP_AdmitMissedTarget60min])/count(*)  as 'Value'
-	, 'Above' as 'DesiredDirection'
+	, 'Below' as 'DesiredDirection'
 	, 'P1' as 'Format'
-	,  NULL as 'Target'
+	,  CAST(NULL as float) as 'Target'
 	, 'EDMart' as 'DataSource'
 	, 1 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
@@ -416,6 +421,36 @@ DSSI.dbo.RollingFiscalYear
 	;
 	GO
 
+	--set targets AVG of last 3 FY; new addition for richmond
+	--compute and store metric
+	IF OBJECT_ID('tempdb.dbo.#TNR_ID02_targets') IS NOT NULL DROP TABLE #TNR_ID02_targets;
+	GO
+
+	SELECT X.TimeFrameLabel
+	, X.Facility
+	, X.Program
+	, Ceiling(1000*AVG( Y.[Value] ))/1000.0 +0.001 as 'Target' 
+	INTO #TNR_ID02_targets
+	FROM #TNR_ID02 as X
+	LEFT JOIN #TNR_ID02 as Y
+	ON  CAST( LEFT(Y.TimeFrameLabel,4)  as int) -1 BETWEEN CAST( LEFT(X.TimeFrameLabel,4) as int)-2 AND CAST( LEFT(X.TimeFrameLabel,4) as int)	--last 3 fiscal years not including current
+	AND RIGHT(X.TimeFrameLabel,2)=RIGHT(Y.TimeFrameLabel,2)	--same period
+	AND X.Facility=Y.Facility	--same site
+	AND X.Program=Y.Program	--same program
+	GROUP BY X.TimeFrameLabel
+	, X.Facility
+	, X.Program
+
+	--add targets to the table
+	UPDATE X
+	SET X.[Target] = Y.[Target]
+	FROM #TNR_ID02 as X INNER JOIN #TNR_ID02_targets as Y
+	ON X.Facility=Y.Facility
+	AND X.Program=Y.Program
+	AND X.TimeFrameLAbel=Y.TimeFrameLabel
+	WHERE Y.[Target] is not null
+	;
+
 -----------------------------------------------
 --ID03 Percent of ED patients admitted to hospital longer than 18 hours (long delays)- P4P
 -----------------------------------------------
@@ -426,6 +461,8 @@ DSSI.dbo.RollingFiscalYear
 	Date Updated: 
 	Inclusions/Exclusions:
 	Comments:
+		Unkown program is when patients are admitted but they never arrive at an inpatient unit and become DDFEs.
+		It is included in the overall, but cannot be allocated to any program.
 	*/
 
 	--preprocess ED data and identify reporting time frames
@@ -476,9 +513,9 @@ DSSI.dbo.RollingFiscalYear
 	, sum([Long_Delay]) as 'Numerator'
 	, count(*) as 'Denominator'
 	, 1.0*sum([Long_Delay])/count(*) as 'Value'
-	, 'Above' as 'DesiredDirection'
-	, 'P0' as 'Format'
-	,  NULL as 'Target'
+	, 'Below' as 'DesiredDirection'
+	, 'P1' as 'Format'
+	,  CAST(NULL as float) as 'Target'
 	, 'EDMart' as 'DataSource'
 	, 0 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
@@ -501,9 +538,9 @@ DSSI.dbo.RollingFiscalYear
 	, sum([Long_Delay]) as 'Numerator'
 	, count(*) as 'Denominator'
 	, 1.0*sum([Long_Delay])/count(*)  as 'Value'
-	, 'Above' as 'DesiredDirection'
-	, 'P0' as 'Format'
-	,  NULL as 'Target'
+	, 'Below' as 'DesiredDirection'
+	, 'P1' as 'Format'
+	,  CAST(NULL as float) as 'Target'
 	, 'EDMart' as 'DataSource'
 	, 1 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
@@ -514,6 +551,35 @@ DSSI.dbo.RollingFiscalYear
 	,FacilityLongName
 	;
 	GO
+
+	--compute and store metric
+	IF OBJECT_ID('tempdb.dbo.#TNR_ID03_targets') IS NOT NULL DROP TABLE #TNR_ID03_targets;
+	GO
+
+	SELECT X.TimeFrameLabel
+	, X.Facility
+	, X.Program
+	, Ceiling(1000*AVG( Y.[Value] ))/1000.0 +0.001 as 'Target' 
+	INTO #TNR_ID03_targets
+	FROM #TNR_ID03 as X
+	LEFT JOIN #TNR_ID03 as Y
+	ON  CAST( LEFT(Y.TimeFrameLabel,4)  as int) -1 BETWEEN CAST( LEFT(X.TimeFrameLabel,4) as int)-2 AND CAST( LEFT(X.TimeFrameLabel,4) as int)	--last 3 fiscal years not including current
+	AND RIGHT(X.TimeFrameLabel,2)=RIGHT(Y.TimeFrameLabel,2)	--same period
+	AND X.Facility=Y.Facility	--same site
+	AND X.Program=Y.Program	--same program
+	GROUP BY X.TimeFrameLabel
+	, X.Facility
+	, X.Program
+
+	--add targets to the table
+	UPDATE X
+	SET X.[Target] = Y.[Target]
+	FROM #TNR_ID03 as X INNER JOIN #TNR_ID02_targets as Y
+	ON X.Facility=Y.Facility
+	AND X.Program=Y.Program
+	AND X.TimeFrameLAbel=Y.TimeFrameLabel
+	WHERE Y.[Target] is not null
+	;
 
 -----------------------------------------------
 -- ID04 ALOS 
@@ -570,6 +636,50 @@ DSSI.dbo.RollingFiscalYear
 	FROM #TNR_financeALOS_04
 	WHERE program !='RHS COO Unallocated'
 	--overall is included in the source data and doesn't need to be added here like the other indicators
+	;
+	GO
+
+	--workaround to get targets
+	IF OBJECT_ID('tempdb.dbo.#TNR_ID04_targets') IS NOT NULL DROP TABLE #TNR_ID04_targets;
+	GO
+
+	SELECT  F.FiscalYear
+	, D.FiscalPeriodEndDate		--get the fiscal period date from another table
+	, CASE	WHEN sector='' AND program='' AND subprogram ='' AND costcenter ='' THEN 'Overall'	--rename the overall label to be consistent with other indicators
+			WHEN Program = 'Critical Care-Med-Pat Flow' THEN   'Emergency-CC & Medicine'		--fix the old names to the new names
+			WHEN Program = 'Home & Community Care' THEN 'Home & Community Care'
+			WHEN Program = 'Med Adm-Surg-Ambl' THEN 'Surgery & Procedural Care'
+			WHEN Program = 'Mental Health & Addictions Ser' THEN  'Mental Health & Addictions Ser'
+			WHEN Program = 'Overall' THEN 'Overall'
+			WHEN Program = 'Population & Family Health' THEN 'Pop & Family Hlth & Primary Cr'
+			WHEN Program = 'Residential Care Services' THEN 'Residential Care Services'
+			ELSE Program
+	END as 'Program'
+	, 'Richmond Hospital' as 'Facility'
+	, LOS as 'Inpatient_Days'					--this inptient days is different from waht I computed in the other indicators
+	, Visits as 'Visits'
+	, IIF(visits is null OR visits =0, null, 1.0*LOS/Visits) as 'ALOS'
+	, Budget as 'Target'
+	INTO #TNR_ID04_targets
+	FROM [FinanceMart].[LOS].[ALOSBudget] as F
+	INNER JOIN #TNR_FPReportTF as D		
+	ON F.FiscalYear=D.FiscalYearLong		--only periods of interest in the report
+	where RptGrouping = 'Entity'	--program groupings
+	AND entity =  'Richmond Health Services'	--richmond only
+	AND subprogram =''							--don't want program breakdowns
+	AND F.Visits !=0	--ignore records with 0 visits
+	;
+	GO
+
+	--add targets; year target to all periods
+	UPDATE X 
+	SET [Target] = Y.[Target]
+	FROM #TNR_ID04 as X
+	INNER JOIN #TNR_ID04_targets as Y
+	ON LEFT(X.TimeFrameLabel,4) = Y.FiscalYear	--same fiscal year
+	AND X.FAcility=Y.Facility	--same facility
+	AND X.Program=Y.Program	--same program
+	WHERE X.[Target] is null --target from the period end report not found; given report grouping by director
 	;
 	GO
 
@@ -2573,3 +2683,6 @@ refer to version 4 June if you want that back, but I can't see why you would.
 
 --	DELETE FROM #TNR_ID04 WHERE Program ='Mental Health & Addictions Ser';
 --	GO
+
+
+
