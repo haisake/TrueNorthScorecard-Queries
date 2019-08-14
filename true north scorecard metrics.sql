@@ -12,81 +12,42 @@ DSSI.dbo.RollingFiscalYear
 ------------------------
 --Indentify true inpatient units
 ------------------------
-	--I'm not sure if this is up to date anymore
-	--Flora mentioned building a maping table somewhere
+	--this Misses richmond TCU patients because they can't be identified by unit
 	IF OBJECT_ID('tempdb.dbo.#adtcNUClassification_tnr') IS NOT NULL DROP TABLE #adtcNUClassification_tnr;
-
-	SELECT f.[FacilityCode]
-	, f.[FacilityShortName]
-	, f.[FacilityLongName]
-	, f.[Site]
-	, n.NursingUnit as NursingUnitCode
-	, NULevel = 'Acute'
-	INTO #adtcNUClassification_tnr
-	FROM [ADTCMart].[dim].[NursingUnit] n
-	LEFT JOIN [ADTCMart].[dim].[Facility] f on n.facilityID = f.facilityID
-	WHERE f.[FacilityCode] in ('0001', '0002', '0007', '0112', 'PR', 'SM', 'SG', 'SPH', 'MSJ'); -- 9 regional acute hospitals
 	GO
 
-	ALTER TABLE #adtcNUClassification_tnr
-	ALTER COLUMN NULevel varchar(50) not null;
+	SELECT * INTO #adtcNUClassification_tnr FROM [DSSI].[dbo].[vwNULevels];
 	GO
 
-	UPDATE #adtcNUClassification_tnr
-	SET NULevel = 'Extended Care'
-	WHERE FacilityShortName in ('VGH', 'UBCH', 'RHS', 'LGH', 'MSJ', 'SGH', 'PRGH')
-	AND NursingUnitCode in ('BP2E', 'BP2W', 'BP3E', 'BP3W', 'BP4E', 'BP4W', 'UP1E', 'UP1W', 'UP2E', 'UP2W', 'UP3E', 'UP3W', 'UP4E', 'UP4W', 'M1E', 'M1W', 'M2E', 'M2W', 'M3W', 'EN1', 'EN2', 'ES1', 'ES2', 'ES3', 'M2W', 'MEC2', 'H1N', 'H1S', 'H2N', 'H2S', 'HSU', 'HTN','NSH SSH', 'BF3', 'BF4', 'HEC1', 'HEC2', 'HEC3', 'LASP', 'LBIR', 'LCDR', 'YOU2', 'YOU3', 'EEVF', 'TOTEM', 'POD', 'GW2', 'GW3', 'GW4','GW5', 'GW6', 'SHOR', 'YRS')	--some could argue this isn't extended care but rather a stepdown unit
-	;
-	GO
-
-	UPDATE #adtcNUClassification_tnr
-	SET NULevel ='Hospice'
-	WHERE /*FacilityShortName in ('VGH', 'UBCH', 'RHS', 'LGH', 'MSJ', 'SGH')
-	AND*/ NursingunitCode in ('NSH', 'PSJH')
-	;
-	GO
-
-	UPDATE #adtcNUClassification_tnr
-	SET NULevel = 'Day Care'
-	WHERE FacilityShortName in ('VGH', 'RHS', 'LGH', 'MSJ', 'SPH', 'PRGH')
-	AND NursingUnitCode in ('MDC', 'RSDC', 'DCM', 'DCP', 'DCR', 'DCS', 'PDC/INPT', 'SDC', 'MSDC');
-	GO
-
-	UPDATE #adtcNUClassification_tnr
-	SET NULevel = 'Transitional Care'
-	WHERE FacilityShortName in ('UBCH', 'LGH')
-	AND NursingUnitCode in ('UK1T', 'UK2C', 'A2T', 'TCU');
-	GO
-
-	UPDATE #adtcNUClassification_tnr
-	SET NULevel = 'Tertiary MH'
-	WHERE FacilityShortName in ('UBCH', 'VGH'/*, 'LRH', 'YRH'*/)
-	AND NursingUnitCode in ('WCC2', 'WP2', 'WP3', 'WP4', 'WP5', 'WP6', 'UD1W', 'UD2S', 'UD2T', 'YOU4', 'YOU5', 'LALT', 'S4MH');
-	GO
-
-	UPDATE #adtcNUClassification_tnr
-	SET NULevel = 'Geriatric Care'
-	WHERE FacilityShortName in ('VGH')
-	AND NursingUnitCode in ('C5A','L5A')
-	;
-	GO
 
 -----------------------------------------------
 --Reporting TimeFrames
 -----------------------------------------------
 
-	--reporting periods, based on 1 day lag
-	IF OBJECT_ID('tempdb.dbo.#TNR_FPReportTF') IS NOT NULL DROP TABLE #TNR_FPReportTF;
+	--distinct reporting periods based on 1 day lag for ADTC update consideration
+	IF OBJECT_ID('tempdb.dbo.#tnr_periods') IS NOT NULL DROP TABLE #tnr_periods;
 	GO
 
-	SELECT distinct TOP 39 FiscalPeriodLong, fiscalperiodstartdate, fiscalperiodenddate, FiscalPeriodEndDateID, FiscalPeriod, FiscalYearLong
-	INTO #TNR_FPReportTF
+	SELECT distinct TOP 53 FiscalPeriodLong, fiscalperiodstartdate, fiscalperiodenddate, FiscalPeriodEndDateID, FiscalPeriod, FiscalYearLong
+	INTO #tnr_periods
 	FROM ADTCMart.dim.[Date]
 	WHERE fiscalperiodenddate <= DATEADD(day, -1, GETDATE())
 	ORDER BY FiscalPeriodEndDate DESC
 	;
 	GO
 	
+	--last 3 years, including current years, fiscal periods
+	IF OBJECT_ID('tempdb.dbo.#TNR_FPReportTF') IS NOT NULL DROP TABLE #TNR_FPReportTF;
+	GO
+
+	SELECT * 
+	INTO #TNR_FPReportTF
+	FROM #tnr_periods
+	WHERE fiscalYearLong in (	SELECT distinct TOP 3  FiscalYearLong FROM #tnr_periods ORDER BY FiscalYearLong DESC )
+	;
+	GO
+
+
 ---------------------------------------------------
 --Finance Data from the General Ledger - April 2019
 ---------------------------------------------------
@@ -1348,7 +1309,9 @@ DSSI.dbo.RollingFiscalYear
 	SELECT X.FiscalPeriodEndDate
 	, X.FiscalPeriodStartDate
 	, X.FiscalPeriodLong
-	, X.EntityDesc				--I might want to move entity into a mapping column as that makes more sense for flexibility
+	, CASE WHEN X.EntityDesc ='Richmond Health Services' THEN 'Richmond Hospital'
+			ELSE NULL
+	END as 'EntityDesc'
 	, Y.LambertProgram  as 'ProgramDesc'
 	, SUM(BudgetedCensusDays) as 'BudgetedCensusDays'
 	, SUM(ActualCensusDays) as 'ActualCensusDays'
@@ -1648,7 +1611,9 @@ DSSI.dbo.RollingFiscalYear
 	GO
 	
 	SELECT '12' as 'IndicatorID'
-	, EntityDesc as 'Facility'
+	, CASE WHEN EntityDesc ='Richmond Health Services' THEN 'Richmond Hospital'
+			ELSE EntityDesc
+	END as 'Facility'
 	, ProgramDesc as 'Program'
 	, D.fiscalPeriodEndDate as 'TimeFrame'
 	, D.FiscalPeriodLong as 'TimeFrameLabel'
@@ -1673,7 +1638,9 @@ DSSI.dbo.RollingFiscalYear
 	--add overall
 	UNION
 	SELECT '12' as 'IndicatorID'
-	, EntityDesc as 'Facility'
+	, CASE WHEN EntityDesc ='Richmond Health Services' THEN 'Richmond Hospital'
+			ELSE EntityDesc
+	END as 'Facility'
 	, 'Overall' as 'Program'
 	, D.fiscalPeriodEndDate as 'TimeFrame'
 	, D.FiscalPeriodLong as 'TimeFrameLabel'
@@ -1863,7 +1830,9 @@ DSSI.dbo.RollingFiscalYear
 	GO
 	
 	SELECT '13' as 'IndicatorID'
-	, EntityDesc as 'Facility'
+	, CASE WHEN EntityDesc ='Richmond Health Services' THEN 'Richmond Hospital'
+			ELSE EntityDesc
+	END as 'Facility'
 	, ProgramDesc as 'Program'
 	, D.fiscalPeriodEndDate as 'TimeFrame'
 	, D.FiscalPeriodLong as 'TimeFrameLabel'
@@ -1888,7 +1857,9 @@ DSSI.dbo.RollingFiscalYear
 	--add overall
 	UNION
 	SELECT '13' as 'IndicatorID'
-	, EntityDesc as 'Facility'
+	, CASE WHEN EntityDesc ='Richmond Health Services' THEN 'Richmond Hospital'
+			ELSE EntityDesc
+	END as 'Facility'
 	, 'Overall' as 'Program'
 	, D.fiscalPeriodEndDate as 'TimeFrame'
 	, D.FiscalPeriodLong as 'TimeFrameLabel'
@@ -2402,15 +2373,16 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	GO
 
 --------------------------------
---- Consolidate Indicators
+--- Consolidate Indicators 
 -------------------------------
-	--clear out the old data values
-	TRUNCATE TABLE DSSI.dbo.TRUE_NORTH_RICHMOND_INDICATORS;
+	
+	--union the results
+	IF OBJECT_ID('tempdb.dbo.#TNR_FinalUnion') is not NULL DROP TABLE #TNR_FinalUnion;
 	GO
-
+	
 	--put the new data into the table
-	INSERT INTO DSSI.dbo.TRUE_NORTH_RICHMOND_INDICATORS (IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory)
 	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	INTO #TNR_FinalUnion
 	FROM #TNR_ID01
 	UNION
 	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
@@ -2472,31 +2444,120 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	FROM #TNR_ID01
 	;
 	GO
+	
+	----------------------------------------------
+	-- Timeseries version
+	-----------------------------------
+		TRUNCATE TABLE DSSI.dbo.TRUE_NORTH_RICHMOND_INDICATORS;
+		GO
 
-	--most recent values
-	--IF OBJECT_ID('tempdb.dbo.#mostRecent') is not null DROP TABLE #mostRecent;
-	--GO
+		INSERT INTO DSSI.dbo.TRUE_NORTH_RICHMOND_INDICATORS (IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory)
+		SELECT * FROM #TNR_FinalUnion
+		;
+		GO
 
-	--SELECT IndicatorName
-	--, Program
-	--, MAX(timeframe) as 'LatestTimeFrame'
-	--INTO #mostRecent
-	--FROM DSSI.dbo.TRUE_NORTH_RICHMOND_INDICATORS
-	--WHERE indicatorID !=16
-	--OR (indicatorID=16 AND program='Overall')
-	--GROUP BY IndicatorName
-	--, Program
-	--;
+	------------------------------
+	-- Most recent values query
+	------------------------------
+		--most recent values
+		--IF OBJECT_ID('tempdb.dbo.#mostRecent') is not null DROP TABLE #mostRecent;
+		--GO
 
-	--SELECT X.*
-	--FROM DSSI.dbo.TRUE_NORTH_RICHMOND_INDICATORS as X
-	--INNER JOIN #mostRecent as Y
-	--ON  X.TimeFrame=Y.LatestTimeFrame
-	--AND X.Program=Y.Program
-	--AND X.IndicatorName=Y.IndicatorName
-	--OR  X.indicatorID in ('08')
-	--WHERE X.Program not in ('Unknown')
-	----ORDER BY IndicatorID ASC, TimeFrame DESC
+		--SELECT IndicatorName
+		--, Program
+		--, MAX(timeframe) as 'LatestTimeFrame'
+		--INTO #mostRecent
+		--FROM DSSI.dbo.TRUE_NORTH_RICHMOND_INDICATORS
+		--WHERE indicatorID !=16
+		--OR (indicatorID=16 AND program='Overall')
+		--GROUP BY IndicatorName
+		--, Program
+		--;
+
+		--SELECT X.*
+		--FROM DSSI.dbo.TRUE_NORTH_RICHMOND_INDICATORS as X
+		--INNER JOIN #mostRecent as Y
+		--ON  X.TimeFrame=Y.LatestTimeFrame
+		--AND X.Program=Y.Program
+		--AND X.IndicatorName=Y.IndicatorName
+		--OR  X.indicatorID in ('08')
+		--WHERE X.Program not in ('Unknown')
+		----ORDER BY IndicatorID ASC, TimeFrame DESC
+
+	------------------------------------
+	-- Year over year version
+	-----------------------------------
+
+		--add on the time frame year values
+		ALTER TABLE #TNR_FinalUnion
+		ADD TimeFrameYear varchar(4), TimeFrameUnit varchar(10)
+		;
+		GO
+
+		UPDATE #TNR_FinalUnion
+		SET TimeFrameYear = CAsE WHEN timeFrameType='Fiscal Period'  THEN LEFT(TimeFrameLabel,4)  
+								 WHEN timeFrameType='Fiscal Quarter' THEN LEFT(TimeFrameLabel,2) 
+								 ELSE timeframeLabel 
+							END
+		, TimeFrameUnit = CAsE WHEN timeFrameType='Fiscal Period'  THEN 'P'+RIGHT(TimeFrameLabel,2)  
+							   WHEN timeFrameType='Fiscal Quarter' THEN 'FQ'+RIGHT(TimeFrameLabel,2) 
+							   ELSE timeframeLabel 
+						  END
+		;
+		GO
+
+		--manipulate the structure into an excel like structure
+		IF OBJECT_ID('tempdb.dbo.#skeleton') is not null DROP TABLE #skeleton;
+		GO
+
+		SELECT *
+		INTO #skeleton 
+		FROM
+		(
+		SELECT distinct IndicatorID, IndicatorName, Facility, Program, [FORMAT], DataSource, [TimeFrameType],  MAX(TimeFrameYear) as 'LatestYear', Cast(MAX(TimeFrameYear)-1 as varchar(4)) as 'LastYear', Cast(MAX(TimeFrameYear)-2 as varchar(4)) as 'TwoYearsAgo' 
+		FROM #TNR_FinalUnion 
+		GROUP BY IndicatorID, IndicatorName, Facility, Program, [FORMAT], Datasource, [TimeFrameType]
+		) as X
+		CROSS JOIN
+		(SELECT distinct TimeFrameUnit FROM #TNR_FinalUnion) as Y
+		;
+		GO
+
+		--manipulate the structure into an excel like structure 
+		IF OBJECT_ID('tempdb.dbo.#TNR_FinalUnion2') is not null DROP TABLE #TNR_FinalUnion2;
+		GO
+
+		SELECT P.IndicatorID, P.IndicatorName, P.Facility, P.Program,P.[Format], P.DataSource, P.[TimeFrameType], P.TimeFrameUnit, P.LatestYear, P.LastYear, P.TwoYearsAgo, X.[Target], X.[Value] as 'LatestYear_Value',  Y.[Value] as 'LastYear_Value', Z.[Value] as 'TwoYearsAgo_Value'
+		INTO #TNR_FinalUnion2
+		FROM #skeleton as P
+		LEFT JOIN #TNR_FinalUnion as X	--get latest year value
+		ON P.IndicatorID = X.IndicatorID AND P.Facility = X.Facility AND P.Program  = X.Program AND P.LatestYear  = X.TimeFrameYear AND P.TimeFrameUnit = X.TimeFrameUnit
+		LEFT JOIN #TNR_FinalUnion as Y	--get latest year value
+		ON P.IndicatorID = Y.IndicatorID AND P.Facility = Y.Facility AND P.Program  = Y.Program AND P.LastYear    = Y.TimeFrameYear AND P.TimeFrameUnit = Y.TimeFrameUnit
+		LEFT JOIN #TNR_FinalUnion as Z	--get latest year value
+		ON P.IndicatorID = Z.IndicatorID AND P.Facility = Z.Facility AND P.Program  = Z.Program AND P.TwoYearsAgo = Z.TimeFrameYear AND P.TimeFrameUnit = Z.TimeFrameUnit
+		--WHERE X.[Value] is not null OR Y.[Value] is not null OR Z.[Value] is not null
+		;
+		GO
+
+		--fill in the target series for the current year
+		UPDATE X 
+		SET [Target]=Y.[Target]
+		FROM #TNR_FinalUnion2 as X
+		LEFT JOIN ( SELECT distinct indicatorId, facility, program, [Target] FROM #TNR_FinalUnion2 WHERE [Target] is not null) as Y
+		ON X.IndicatorID=Y.IndicatorID AND X.Facility=Y.Facility AND X.Program=Y.Program
+		WHERE X.[Target] is null
+		;
+		GO
+
+		--save the results to the YOY table
+		TRUNCATE TABLE DSSI.[dbo].[TRUE_NORTH_RICHMOND_INDICATORS_YOY] ;
+		GO
+
+		INSERT INTO DSSI.[dbo].[TRUE_NORTH_RICHMOND_INDICATORS_YOY] ([IndicatorID],IndicatorName, [Facility], [Program], [FORMAT], DataSource, [TimeFrameType], [TimeFrameUnit], LatestYear, LastYear, TwoYearsAgo, [Target], [LatestYear_Value], [LastYear_Value], [TwoYearsAgo_Value] )
+		SELECT * FROM #TNR_FinalUnion2 
+		;
+		GO
 
 
 ------------
