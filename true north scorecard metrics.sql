@@ -1626,7 +1626,7 @@ DSSI.dbo.RollingFiscalYear
 	, IIF(OT.Act_ProdHrs=0, 0, 1.0*OT.Act_OTHrs/OT.Act_ProdHrs) as 'Value' --division by 0 errors are set as 0; Technically they are nulls, but 0's will stop the lines from being wierd and I feel 0/0 = 0 is fair in this case.
 	, 'Below' as 'DesiredDirection'
 	, 'P2' as 'Format'		--to match finance portal
-	, 0.022 as 'Target'
+	, IIF(OT.Bud_ProdHrs =0, 0, 1.0 * Bud_OTHrs/OT.Bud_ProdHrs) as 'Target'
 	, 'FinanceMart' as 'DataSource'
 	, 0 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
@@ -1653,7 +1653,7 @@ DSSI.dbo.RollingFiscalYear
 	,  IIF( SUM(OT.Act_ProdHrs)=0, 0, 1.0*SUM(OT.Act_OTHrs)/SUM(OT.Act_ProdHrs)  ) as 'Value' --division by 0 errors are set as 0; Technically they are nulls, but 0's will stop the lines from being wierd and I feel 0/0 = 0 is fair in this case.
 	, 'Below' as 'DesiredDirection'
 	, 'P2' as 'Format'		--to match finance portal
-	, 0.022 as 'Target'
+	, IIF(SUM(OT.Bud_ProdHrs) =0, 0, 1.0 * SUM(Bud_OTHrs)/SUM(OT.Bud_ProdHrs)  ) as 'Target'
 	, 'FinanceMart' as 'DataSource'
 	, 0 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
@@ -1845,7 +1845,7 @@ DSSI.dbo.RollingFiscalYear
 	, IIF(ST.Act_ProdHrs=0, 0, 1.0*ST.Act_STHrs/ST.Act_ProdHrs) as 'Value'	--division by 0 errors are set as 0; Technically they are nulls, but 0's will stop the lines from being wierd and I feel 0/0 = 0 is fair in this case.
 	, 'Below' as 'DesiredDirection'
 	, 'P2' as 'Format'		--to match finance portal
-	, 0.022 as 'Target'
+	, IIF( ST.Bud_ProdHrs =0, 0, 1.0 * ST.Bud_STHrs/ST.Bud_ProdHrs  ) as 'Target'
 	, 'FinanceMart' as 'DataSource'
 	, 0 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
@@ -1872,7 +1872,7 @@ DSSI.dbo.RollingFiscalYear
 	,  IIF( SUM(ST.Act_ProdHrs)=0, 0, 1.0*SUM(ST.Act_STHrs)/SUM(ST.Act_ProdHrs)  ) as 'Value' --division by 0 errors are set as 0; Technically they are nulls, but 0's will stop the lines from being wierd and I feel 0/0 = 0 is fair in this case.
 	, 'Below' as 'DesiredDirection'
 	, 'P2' as 'Format'		--to match finance portal
-	, 0.022 as 'Target'
+	, IIF(SUM(ST.Bud_ProdHrs) =0, 0, 1.0 * SUM(ST.Bud_STHrs)/SUM(ST.Bud_ProdHrs)  ) as 'Target'
 	, 'FinanceMart' as 'DataSource'
 	, 0 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
@@ -2663,7 +2663,8 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	UNION
 	SELECT 	'21' as 'IndicatorID'
 	, FacilityLongName as 'Facility'
-		, FiscalPeriodEndDate as 'TimeFrame'
+	, 'Overall' as 'Program'
+	, FiscalPeriodEndDate as 'TimeFrame'
 	, FiscalPeriodLong as 'TimeFrameLabel'
 	, 'Fiscal Period' as 'TimeFrameType'
 	, 'Emergency Admissions' as 'IndicatorName'
@@ -2905,6 +2906,18 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	UNION
 	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
 	FROM #TNR_ID18
+	UNION
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	FROM #TNR_ID19
+	UNION
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	FROM #TNR_ID20
+	UNION
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	FROM #TNR_ID21
+	UNION
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	FROM #TNR_ID22
 	--add fake rows to populate summary page
 	UNION
 	SELECT TOP 1 '08', 'Richmond Hospital', 'Overall', '2020-07-25','2020-04','Fiscal Period','Discharges actual vs. predicted', NULL,NULL, NULL, 'Above','D1',NULL,'Placeholder',1,1, 'Exceptional Care'
@@ -2912,7 +2925,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	;
 	GO
 	
-	----------------------------------------------
+	-----------------------------------
 	-- Timeseries version
 	-----------------------------------
 		TRUNCATE TABLE DSSI.dbo.TRUE_NORTH_RICHMOND_INDICATORS;
@@ -2924,32 +2937,47 @@ refer to version 4 June if you want that back, but I can't see why you would.
 		GO
 
 	------------------------------
-	-- Most recent values query
+	-- for time series vesion SSRS
 	------------------------------
-		--most recent values
-		--IF OBJECT_ID('tempdb.dbo.#mostRecent') is not null DROP TABLE #mostRecent;
-		--GO
 
-		--SELECT IndicatorName
-		--, Program
-		--, MAX(timeframe) as 'LatestTimeFrame'
-		--INTO #mostRecent
-		--FROM DSSI.dbo.TRUE_NORTH_RICHMOND_INDICATORS
-		--WHERE indicatorID !=16
-		--OR (indicatorID=16 AND program='Overall')
-		--GROUP BY IndicatorName
-		--, Program
-		--;
+		----most recent values
+		--WITH mostRecent as (
+		--	SELECT IndicatorName
+		--	, Program
+		--	, MAX(timeframe) as 'LatestTimeFrame'
+		--	FROM DSSI.dbo.TRUE_NORTH_RICHMOND_INDICATORS
+		--	WHERE indicatorID !=16
+		--	OR (indicatorID=16 AND program='Overall')
+		--	GROUP BY IndicatorName
+		--	, Program
+		--)
 
 		--SELECT X.*
 		--FROM DSSI.dbo.TRUE_NORTH_RICHMOND_INDICATORS as X
-		--INNER JOIN #mostRecent as Y
+		--INNER JOIN mostRecent  as Y
 		--ON  X.TimeFrame=Y.LatestTimeFrame
 		--AND X.Program=Y.Program
 		--AND X.IndicatorName=Y.IndicatorName
 		--OR  X.indicatorID in ('08')
 		--WHERE X.Program not in ('Unknown')
-		----ORDER BY IndicatorID ASC, TimeFrame DESC
+		--AND X.Scorecard_eligible=1
+
+
+		--mastertableall
+		--SELECT X.*, Y.[Y-Axis_Max], Y.[Y-Axis_Min]
+		--FROM DSSI.dbo.TRUE_NORTH_RICHMOND_INDICATORS as X
+		--LEFT JOIN
+		--(
+		--SELECT distinct indicatorID
+		--, CASE WHEN MAX(LEFT([Format],1))='P' AND  ROUND(1.1*MAX([Value]), MAX( CAST(RIGHT([Format],1) as float) )  )>=1 AND indicatorID in ('01','02','03','16') THEN 1
+		--	   ELSE ROUND(1.1*MAX([Value]), MAX( CAST(RIGHT([Format],1) as float) )  ) 
+		--END as 'Y-Axis_Max'
+		--, ROUND(IIF(MIN([Value])>=0, 0.9, 1.1)*MIN([Value]), MIN( CAST(RIGHT([Format],1) as float) ) ) as 'Y-Axis_Min'	/*if negative need to make it bigger not smaller so 1.1*/
+		--FROM DSSI.[dbo].[TRUE_NORTH_RICHMOND_INDICATORS]
+		--GROUP BY IndicatorID
+		--) as Y
+		--ON X.IndicatorID=Y.IndicatorID
+		--WHERE X.Scorecard_eligible=1
 
 	------------------------------------
 	-- Year over year version
@@ -2981,9 +3009,9 @@ refer to version 4 June if you want that back, but I can't see why you would.
 		INTO #skeleton 
 		FROM
 		(
-		SELECT distinct IndicatorID, IndicatorName, Facility, Program, [FORMAT], DataSource, [TimeFrameType],  MAX(TimeFrameYear) as 'LatestYear', Cast(MAX(TimeFrameYear)-1 as varchar(4)) as 'LastYear', Cast(MAX(TimeFrameYear)-2 as varchar(4)) as 'TwoYearsAgo' 
+		SELECT distinct IndicatorID, IndicatorName, Facility, Program, [FORMAT], DataSource, Scorecard_eligible, [TimeFrameType],  MAX(TimeFrameYear) as 'LatestYear', Cast(MAX(TimeFrameYear)-1 as varchar(4)) as 'LastYear', Cast(MAX(TimeFrameYear)-2 as varchar(4)) as 'TwoYearsAgo' 
 		FROM #TNR_FinalUnion 
-		GROUP BY IndicatorID, IndicatorName, Facility, Program, [FORMAT], Datasource, [TimeFrameType]
+		GROUP BY IndicatorID, IndicatorName, Facility, Program, [FORMAT], DataSource, Scorecard_eligible, [TimeFrameType]
 		) as X
 		CROSS JOIN
 		(SELECT distinct TimeFrameUnit FROM #TNR_FinalUnion) as Y
@@ -2994,7 +3022,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 		IF OBJECT_ID('tempdb.dbo.#TNR_FinalUnion2') is not null DROP TABLE #TNR_FinalUnion2;
 		GO
 
-		SELECT P.IndicatorID, P.IndicatorName, P.Facility, P.Program,P.[Format], P.DataSource, P.[TimeFrameType], P.TimeFrameUnit, P.LatestYear, P.LastYear, P.TwoYearsAgo, X.[Target], X.[Value] as 'LatestYear_Value',  Y.[Value] as 'LastYear_Value', Z.[Value] as 'TwoYearsAgo_Value'
+		SELECT P.IndicatorID, P.IndicatorName, P.Facility, P.Program,P.[Format], P.DataSource, P.Scorecard_eligible, P.[TimeFrameType], P.TimeFrameUnit, P.LatestYear, P.LastYear, P.TwoYearsAgo, X.[Target], X.[Value] as 'LatestYear_Value',  Y.[Value] as 'LastYear_Value', Z.[Value] as 'TwoYearsAgo_Value'
 		INTO #TNR_FinalUnion2
 		FROM #skeleton as P
 		LEFT JOIN #TNR_FinalUnion as X	--get latest year value
@@ -3021,15 +3049,62 @@ refer to version 4 June if you want that back, but I can't see why you would.
 		TRUNCATE TABLE DSSI.[dbo].[TRUE_NORTH_RICHMOND_INDICATORS_YOY] ;
 		GO
 
-		INSERT INTO DSSI.[dbo].[TRUE_NORTH_RICHMOND_INDICATORS_YOY] ([IndicatorID],IndicatorName, [Facility], [Program], [FORMAT], DataSource, [TimeFrameType], [TimeFrameUnit], LatestYear, LastYear, TwoYearsAgo, [Target], [LatestYear_Value], [LastYear_Value], [TwoYearsAgo_Value] )
+		INSERT INTO DSSI.[dbo].[TRUE_NORTH_RICHMOND_INDICATORS_YOY] ([IndicatorID],IndicatorName, [Facility], [Program], [FORMAT], DataSource, Scorecard_eligible, [TimeFrameType], [TimeFrameUnit], LatestYear, LastYear, TwoYearsAgo, [Target], [LatestYear_Value], [LastYear_Value], [TwoYearsAgo_Value] )
 		SELECT * FROM #TNR_FinalUnion2 
 		;
 		GO
 
+		--------------------
+		-- For YOY version
+		--------------------
+		--mastertablemostrecent ; same as the time series version
+
+		----master table all
+		--SELECT X.*
+		--, CASE	WHEN X.IndicatorId not in ('04') THEN ROUND(Y.[Y-Axis_Max],Y.RoundPrecision)
+		--		ELSE ROUND(Z.[Y-Axis_Max],Z.RoundPrecision) 
+		--END as 'Y-Axis_Max'
+		--, CASE	WHEN X.IndicatorId not in ('04') THEN ROUND(Y.[Y-Axis_Min],Y.RoundPrecision)
+		--		ELSE ROUND(Z.[Y-Axis_Min],Z.RoundPrecision) 
+		--END as 'Y-Axis_Min'
+		--FROM [DSSI].[dbo].[TRUE_NORTH_RICHMOND_INDICATORS_YOY] as X
+		--LEFT JOIN
+		--(
+		--	SELECT distinct indicatorID
+		--	, CASE	WHEN indicatorID='01' THEN 1
+		--			ELSE MAX([Value])
+		--	END as 'Y-Axis_Max'
+		--		, CASE	WHEN indicatorID='01' THEN 0
+		--			ELSE MIN([Value])
+		--	END as 'Y-Axis_Min'	
+		--	, CASE WHEN MAX(LEFT([FORMAT],1))='P' THEN CAST(MAX(RIGHT([FORMAT],1)) as int) +2
+		--		   ELSE CAST(MAX(RIGHT([FORMAT],1)) as int)
+		--	END as 'RoundPrecision'
+		--	FROM DSSI.[dbo].[TRUE_NORTH_RICHMOND_INDICATORS]
+		--	WHERE indicatorID !='04'
+		--	GROUP BY IndicatorID
+		--) as Y
+		--ON X.IndicatorID=Y.IndicatorID
+		--LEFT JOIN
+		--(
+		--	SELECT distinct indicatorID
+		--	, Program
+		--	, MAX([Value]) as 'Y-Axis_Max'
+		--	, MIN([Value]) as 'Y-Axis_Min'	
+		--	, CASE WHEN MAX(LEFT([FORMAT],1))='P' THEN CAST(MAX(RIGHT([FORMAT],1)) as int) +2
+		--		   ELSE CAST(MAX(RIGHT([FORMAT],1)) as int)
+		--	END as 'RoundPrecision'
+		--	FROM DSSI.[dbo].[TRUE_NORTH_RICHMOND_INDICATORS]
+		--	WHERE indicatorID ='04'
+		--	GROUP BY IndicatorID, Program
+		--) as Z
+		--ON X.IndicatorID=Z.IndicatorID AND X.Program=Z.Program
+		--WHERE X.Scorecard_eligible=1
 
 ------------
 -- END QUERY
 ------------
+
 
 --Discontinued indicators
 
