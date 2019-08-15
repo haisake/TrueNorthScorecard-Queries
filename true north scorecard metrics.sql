@@ -19,7 +19,6 @@ DSSI.dbo.RollingFiscalYear
 	SELECT * INTO #adtcNUClassification_tnr FROM [DSSI].[dbo].[vwNULevels];
 	GO
 
-
 -----------------------------------------------
 --Reporting TimeFrames
 -----------------------------------------------
@@ -669,7 +668,7 @@ DSSI.dbo.RollingFiscalYear
 	-------------------
 	--pull LLOS (>30 days) census data for patients 
 	------------------
-	IF OBJECT_ID('tempdb.dbo.#TNR_cLLOS_Census') IS NOT NULL DROP TABLE #TNR_cLLOS_Census;
+	IF OBJECT_ID('tempdb.dbo.#TNR_LLOS_data') IS NOT NULL DROP TABLE #TNR_LLOS_data;
 	GO
 
 	SELECT  
@@ -677,12 +676,15 @@ DSSI.dbo.RollingFiscalYear
 		 WHEN ADTC.AdmitToCensusDays BETWEEN 31 AND 210 THEN ADTC.AdmittoCensusDays-30 
 		 ELSE 0
 	END as 'LLOSDays'
+	,CASE	WHEN ADTC.AdmitToCensusDays > 30 THEN ADTC.PatientID	--redundant
+			ELSE NULL
+	END as 'LLOS_PatientID'
 	, ISNULL(MAP.NewProgram,'Unknown') as 'Program'
 	, D.FiscalPeriodLong
 	, D.FiscalPeriodEndDate
 	, ADTC.FacilityLongName
 	, ADTC.PatientId
-	INTO #TNR_cLLOS_Census
+	INTO #TNR_LLOS_data
 	FROM ADTCMart.[ADTC].[vwCensusFact] as ADTC
 	INNER JOIN #TNR_FPReportTF as D 
 	ON ADTC.CensusDate =D.FiscalPeriodEndDate	--pull census for the fiscal period end, as a snapshot
@@ -713,10 +715,10 @@ DSSI.dbo.RollingFiscalYear
 	, FiscalPeriodEndDate as 'TimeFrame'
 	, FiscalPeriodLong as 'TimeFrameLabel'
 	, 'Fiscal Period' as 'TimeFrameType'
-	, 'Number of Long Length of Stay (> 30 days) patient days snapshot' as 'IndicatorName' 
+	, 'Number of Long Length of Stay (> 30 days) patients snapshot' as 'IndicatorName' 
 	, NULL as 'Numerator'
 	, NULL as 'Denominator'
-	, SUM(LLOSDays) as 'Value'
+	, COUNT(distinct LLOS_PatientID) as 'Value'
 	 , 'Below' as 'DesiredDirection'
 	, 'D0' as 'Format'
 	--, CASE WHEN FiscalPeriodEndDate BETWEEN '2012-04-01' AND '2013-03-31' THEN 1697
@@ -734,7 +736,7 @@ DSSI.dbo.RollingFiscalYear
 	, 1 as 'Scorecard_eligible'
 	, 'Convenient Health Care' as 'IndicatorCategory'
 	INTO #TNR_ID05
-	FROM #TNR_cLLOS_Census
+	FROM #TNR_LLOS_data
 	GROUP BY FiscalPeriodLong
 	, FiscalPeriodEndDate
 	,Program
@@ -747,10 +749,10 @@ DSSI.dbo.RollingFiscalYear
 	, FiscalPeriodEndDate as 'TimeFrame'
 	, FiscalPeriodLong as 'TimeFrameLabel'
 	, 'Fiscal Period' as 'TimeFrameType'
-	, 'Number of Long Length of Stay (> 30 days) patient days snapshot' as 'IndicatorName' 
+	, 'Number of Long Length of Stay (> 30 days) patients snapshot' as 'IndicatorName' 
 	, NULL as 'Numerator'
 	, NULL as 'Denominator'
-	, SUM(LLOSDays) as 'Value'
+	, COUNT(distinct LLOS_PatientID) as 'Value'
 	, 'Below' as 'DesiredDirection'
 	, 'D0' as 'Format'
 	--, CASE WHEN FiscalPeriodEndDate BETWEEN '2012-04-01' AND '2013-03-31' THEN 1697
@@ -767,7 +769,7 @@ DSSI.dbo.RollingFiscalYear
 	, 1 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Convenient Health Care' as 'IndicatorCategory'
-	FROM #TNR_cLLOS_Census
+	FROM #TNR_LLOS_data
 	GROUP BY FiscalPeriodLong
 	, FiscalPeriodEndDate
 	, FacilityLongName
@@ -2369,6 +2371,471 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	GROUP BY FiscalPeriodLong
 	, fiscalPeriodEndDate
 	, DischargeFacilityLongName
+	;
+	GO
+
+
+-----------------------------------------------
+--ID 19 ED visits
+-----------------------------------------------
+	/*
+	Purpose: To compute how many people visit ED
+	Author: Hans Aisake
+	Date Created: August 15, 2019
+	Date Updated: 
+	Inclusions/Exclusions:
+	Comments:
+		Unkown program is when patients are admitted but they never arrive at an inpatient unit and become DDFEs.
+		It is included in the overall, but cannot be allocated to any program.
+
+	*/
+
+	--preprocess ED data and identify reporting time frames
+	IF OBJECT_ID('tempdb.dbo.#tnr_ed19') IS NOT NULL DROP TABLE #tnr_ed19;
+	GO
+
+	--I wrote the computations in the complex way in an attempt to save a few seconds of computation; I am not sure I succeeded.
+	SELECT 	T.FiscalPeriodLong
+	, T.FiscalPeriodEndDate
+	, X.VisitID
+	, X.Program
+	, X.FacilityLongName
+	INTO #TNR_ed19
+	FROM
+	(
+		SELECT ED.StartDate
+		, ED.VisitID
+		, ISNULL(MAP.NewProgram,'Unknown') as 'Program'
+		, ED.FacilityLongName
+		FROM EDMart.dbo.vwEDVisitIdentifiedRegional as ED
+		LEFT JOIN DSSI.[dbo].[RH_VisibilityWall_NU_PROGRAM_MAP_ADTC] as MAP	--link to a fact table that identifies which program each unit goes to; not maintained by DMR
+		ON ED.InpatientNursingUnitID= MAP.NursingUnitID			--same nursing unit id
+		AND ED.StartDate BETWEEN MAP.StartDate AND MAP.EndDate	--within mapping dates; you could argue for inpatient date, but it's a minor issue
+		WHERE ED.FacilityShortName='RHS'
+		AND ED.admittedflag=1
+		AND ED.StartDate >= (SELECT MIN(FiscalPeriodStartDate) FROM #TNR_FPReportTF)
+		--AND IsNACRSSubmitted ='Y'	--this is not a well known filter but it only applies to about 1/1000 ed visits; this mostly delays initial reporting for several days and I've removed it. It seams to be non-value add
+		AND not exists (SELECT 1 FROM EDMart.dbo.vwDTUDischargedHome as Z WHERE ED.continuumID=Z.ContinuumID)	--exclude clients discharged home from the DTU 
+	) as X
+	INNER JOIN #TNR_FPReportTF as T						--only keep reporting weeks we care about
+	ON X.startdate BETWEEN T.FiscalPeriodStartDate AND T.FiscalPeriodEndDate
+	;
+	GO
+
+	-----------------------------------------------
+	--generate indicators and store the data
+	-----------------------------------------------
+	IF OBJECT_ID('tempdb.dbo.#TNR_ID19') IS NOT NULL DROP TABLE #TNR_ID19;
+	GO
+
+	SELECT 	'19' as 'IndicatorID'
+	, FacilityLongName as 'Facility'
+	, Program as 'Program'
+	, FiscalPeriodEndDate as 'TimeFrame'
+	, FiscalPeriodLong as 'TimeFrameLabel'
+	, 'Fiscal Period' as 'TimeFrameType'
+	, 'Nuber of Emergency Visits' as 'IndicatorName'
+	, NULL as 'Numerator'
+	, NULL as 'Denominator'
+	, count(distinct VisitID) as 'Value'
+	, 'Below' as 'DesiredDirection'
+	, 'D0' as 'Format'
+	,  NULL as 'Target'
+	, 'EDMart' as 'DataSource'
+	, 0 as 'IsOverall'
+	, 0 as 'Scorecard_eligible'
+	, 'True North Metrics' as 'IndicatorCategory'
+	INTO #TNR_ID19
+	FROM #TNR_ed19
+	GROUP BY FiscalPeriodLong
+	, FiscalPeriodEndDate
+	,Program
+	, FacilityLongName
+	--add overall indicator
+	UNION
+	SELECT 	'19' as 'IndicatorID'
+	, FacilityLongName as 'Facility'
+	, 'Overall' as 'Program'
+	, FiscalPeriodEndDate as 'TimeFrame'
+	, FiscalPeriodLong as 'TimeFrameLabel'
+	, 'Fiscal Period' as 'TimeFrameType'
+	, 'Nuber of Emergency Visits' as 'IndicatorName'
+	, NULL as 'Numerator'
+	, NULL as 'Denominator'
+	, count(distinct VisitID) as 'Value'
+	, 'Below' as 'DesiredDirection'
+	, 'D0' as 'Format'
+	, NULL as 'Target'
+	, 'EDMart' as 'DataSource'
+	, 1 as 'IsOverall'
+	, 0 as 'Scorecard_eligible'
+	, 'True North Metrics' as 'IndicatorCategory'
+	FROM #TNR_ed19
+	GROUP BY FiscalPeriodLong
+	, FiscalPeriodEndDate
+	, FacilityLongName
+	;
+	GO
+
+-----------------------------------------------
+--ID 20 ED Admission Rate
+-----------------------------------------------
+	/*
+	Purpose: To compute the ED admission Rate
+	Author: Hans Aisake
+	Date Created: August 15, 2019
+	Date Updated: 
+	Inclusions/Exclusions:
+	Comments:
+		Unkown program is when patients are admitted but they never arrive at an inpatient unit and become DDFEs.
+		It is included in the overall, but cannot be allocated to any program.
+
+	*/
+
+	--preprocess ED data and identify reporting time frames
+	IF OBJECT_ID('tempdb.dbo.#tnr_ed20') IS NOT NULL DROP TABLE #tnr_ed20;
+	GO
+
+	--I wrote the computations in the complex way in an attempt to save a few seconds of computation; I am not sure I succeeded.
+	SELECT 	T.FiscalPeriodLong
+	, T.FiscalPeriodEndDate
+	, X.VisitID
+	, X.AdmittedFlag
+	, X.Program
+	, X.FacilityLongName
+	INTO #TNR_ed20
+	FROM
+	(
+		SELECT ED.StartDate
+		, ED.VisitID
+		, ED.AdmittedFlag
+		, ISNULL(MAP.NewProgram,'Unknown') as 'Program'
+		, ED.FacilityLongName
+		FROM EDMart.dbo.vwEDVisitIdentifiedRegional as ED
+		LEFT JOIN DSSI.[dbo].[RH_VisibilityWall_NU_PROGRAM_MAP_ADTC] as MAP	--link to a fact table that identifies which program each unit goes to; not maintained by DMR
+		ON ED.InpatientNursingUnitID= MAP.NursingUnitID			--same nursing unit id
+		AND ED.StartDate BETWEEN MAP.StartDate AND MAP.EndDate	--within mapping dates; you could argue for inpatient date, but it's a minor issue
+		WHERE ED.FacilityShortName='RHS'
+		AND ED.admittedflag=1
+		AND ED.StartDate >= (SELECT MIN(FiscalPeriodStartDate) FROM #TNR_FPReportTF)
+		--AND IsNACRSSubmitted ='Y'	--this is not a well known filter but it only applies to about 1/1000 ed visits; this mostly delays initial reporting for several days and I've removed it. It seams to be non-value add
+		AND not exists (SELECT 1 FROM EDMart.dbo.vwDTUDischargedHome as Z WHERE ED.continuumID=Z.ContinuumID)	--exclude clients discharged home from the DTU 
+	) as X
+	INNER JOIN #TNR_FPReportTF as T						--only keep reporting weeks we care about
+	ON X.startdate BETWEEN T.FiscalPeriodStartDate AND T.FiscalPeriodEndDate
+	;
+	GO
+
+	-----------------------------------------------
+	--generate indicators and store the data
+	-----------------------------------------------
+	IF OBJECT_ID('tempdb.dbo.#TNR_ID20') IS NOT NULL DROP TABLE #TNR_ID20;
+	GO
+
+	SELECT 	'20' as 'IndicatorID'
+	, FacilityLongName as 'Facility'
+	, Program as 'Program'
+	, FiscalPeriodEndDate as 'TimeFrame'
+	, FiscalPeriodLong as 'TimeFrameLabel'
+	, 'Fiscal Period' as 'TimeFrameType'
+	, 'Emergency Admission Rate' as 'IndicatorName'
+	, count(distinct CASE WHEN AdmittedFlag=1 THEN VisitID ELSE NULL END) as 'Numerator'
+	, count(distinct VisitID) as 'Denominator'
+	, count(distinct VisitID) as 'Value'
+	, 'Below' as 'DesiredDirection'
+	, 'P1' as 'Format'
+	,  NULL as 'Target'
+	, 'EDMart' as 'DataSource'
+	, 0 as 'IsOverall'
+	, 0 as 'Scorecard_eligible'
+	, 'True North Metrics' as 'IndicatorCategory'
+	INTO #TNR_ID20
+	FROM #TNR_ed20
+	GROUP BY FiscalPeriodLong
+	, FiscalPeriodEndDate
+	,Program
+	, FacilityLongName
+	--add overall indicator
+	UNION
+	SELECT 	'20' as 'IndicatorID'
+	, FacilityLongName as 'Facility'
+	, 'Overall' as 'Program'
+	, FiscalPeriodEndDate as 'TimeFrame'
+	, FiscalPeriodLong as 'TimeFrameLabel'
+	, 'Fiscal Period' as 'TimeFrameType'
+	, 'Emergency Admission Rate' as 'IndicatorName'
+	, count(distinct CASE WHEN AdmittedFlag=1 THEN VisitID ELSE NULL END) as 'Numerator'
+	, count(distinct VisitID) as 'Denominator'
+	, count(distinct VisitID) as 'Value'
+	, 'Below' as 'DesiredDirection'
+	, 'P1' as 'Format'
+	, NULL as 'Target'
+	, 'EDMart' as 'DataSource'
+	, 1 as 'IsOverall'
+	, 0 as 'Scorecard_eligible'
+	, 'True North Metrics' as 'IndicatorCategory'
+	FROM #TNR_ed20
+	GROUP BY FiscalPeriodLong
+	, FiscalPeriodEndDate
+	, FacilityLongName
+	;
+	GO
+
+-----------------------------------------------
+--ID 21 ED Admission Volume
+-----------------------------------------------
+	/*
+	Purpose: To compute the ED admission volumes
+	Author: Hans Aisake
+	Date Created: August 15, 2019
+	Date Updated: 
+	Inclusions/Exclusions:
+	Comments:
+		Unkown program is when patients are admitted but they never arrive at an inpatient unit and become DDFEs.
+		It is included in the overall, but cannot be allocated to any program.
+
+	*/
+
+	--preprocess ED data and identify reporting time frames
+	IF OBJECT_ID('tempdb.dbo.#tnr_ed21') IS NOT NULL DROP TABLE #tnr_ed21;
+	GO
+
+	--I wrote the computations in the complex way in an attempt to save a few seconds of computation; I am not sure I succeeded.
+	SELECT 	T.FiscalPeriodLong
+	, T.FiscalPeriodEndDate
+	, X.VisitID
+	, X.AdmittedFlag
+	, X.Program
+	, X.FacilityLongName
+	INTO #TNR_ed21
+	FROM
+	(
+		SELECT ED.StartDate
+		, ED.VisitID
+		, ED.AdmittedFlag
+		, ISNULL(MAP.NewProgram,'Unknown') as 'Program'
+		, ED.FacilityLongName
+		FROM EDMart.dbo.vwEDVisitIdentifiedRegional as ED
+		LEFT JOIN DSSI.[dbo].[RH_VisibilityWall_NU_PROGRAM_MAP_ADTC] as MAP	--link to a fact table that identifies which program each unit goes to; not maintained by DMR
+		ON ED.InpatientNursingUnitID= MAP.NursingUnitID			--same nursing unit id
+		AND ED.StartDate BETWEEN MAP.StartDate AND MAP.EndDate	--within mapping dates; you could argue for inpatient date, but it's a minor issue
+		WHERE ED.FacilityShortName='RHS'
+		AND ED.admittedflag=1
+		AND ED.StartDate >= (SELECT MIN(FiscalPeriodStartDate) FROM #TNR_FPReportTF)
+		--AND IsNACRSSubmitted ='Y'	--this is not a well known filter but it only applies to about 1/1000 ed visits; this mostly delays initial reporting for several days and I've removed it. It seams to be non-value add
+		AND not exists (SELECT 1 FROM EDMart.dbo.vwDTUDischargedHome as Z WHERE ED.continuumID=Z.ContinuumID)	--exclude clients discharged home from the DTU 
+	) as X
+	INNER JOIN #TNR_FPReportTF as T						--only keep reporting weeks we care about
+	ON X.startdate BETWEEN T.FiscalPeriodStartDate AND T.FiscalPeriodEndDate
+	;
+	GO
+
+	-----------------------------------------------
+	--generate indicators and store the data
+	-----------------------------------------------
+	IF OBJECT_ID('tempdb.dbo.#TNR_ID21') IS NOT NULL DROP TABLE #TNR_ID21;
+	GO
+
+	SELECT 	'21' as 'IndicatorID'
+	, FacilityLongName as 'Facility'
+	, Program as 'Program'
+	, FiscalPeriodEndDate as 'TimeFrame'
+	, FiscalPeriodLong as 'TimeFrameLabel'
+	, 'Fiscal Period' as 'TimeFrameType'
+	, 'Emergency Admissions' as 'IndicatorName'
+	, NULL as 'Numerator'
+	, NULL as 'Denominator'
+	, count(distinct CASE WHEN AdmittedFlag=1 THEN VisitID ELSE NULL END) as 'Value'
+	, 'Below' as 'DesiredDirection'
+	, 'D0' as 'Format'
+	,  NULL as 'Target'
+	, 'EDMart' as 'DataSource'
+	, 0 as 'IsOverall'
+	, 0 as 'Scorecard_eligible'
+	, 'True North Metrics' as 'IndicatorCategory'
+	INTO #TNR_ID21
+	FROM #TNR_ed21
+	GROUP BY FiscalPeriodLong
+	, FiscalPeriodEndDate
+	,Program
+	, FacilityLongName
+	--add overall indicator
+	UNION
+	SELECT 	'21' as 'IndicatorID'
+	, FacilityLongName as 'Facility'
+		, FiscalPeriodEndDate as 'TimeFrame'
+	, FiscalPeriodLong as 'TimeFrameLabel'
+	, 'Fiscal Period' as 'TimeFrameType'
+	, 'Emergency Admissions' as 'IndicatorName'
+	, NULL as 'Numerator'
+	, NULL as 'Denominator'
+	, count(distinct CASE WHEN AdmittedFlag=1 THEN VisitID ELSE NULL END) as 'Value'
+	, 'Below' as 'DesiredDirection'
+	, 'D0' as 'Format'
+	,  NULL as 'Target'
+	, 'EDMart' as 'DataSource'
+	, 1 as 'IsOverall'
+	, 0 as 'Scorecard_eligible'
+	, 'True North Metrics' as 'IndicatorCategory'
+	FROM #TNR_ed21
+	GROUP BY FiscalPeriodLong
+	, FiscalPeriodEndDate
+	, FacilityLongName
+	;
+	GO
+
+-----------------------------------------------
+-- ID22 ALC Days
+-----------------------------------------------
+	/*
+	Purpose: To compute how many inpatient days were ALC there were.
+	Author: Hans Aisake
+	Date Created: June 14, 2018
+	Date Updated: August 15, 2019
+	Inclusions/Exclusions:
+		- true inpatient records only
+		- excludes newborns
+	Comments:
+	*/
+
+	--links census data which has ALC information with admission/discharge information
+	IF OBJECT_ID('tempdb.dbo.#TNR_discharges_22') IS NOT NULL DROP TABLE #TNR_discharges_22;
+	GO
+
+	SELECT AccountNumber
+	, T.FiscalPeriodLong
+	, T.FiscalPeriodEndDate
+	, A.DischargeNursingUnitDesc
+	, ISNULL(MAP.NewProgram,'Unknown') as 'Program'
+	, A.DischargeFacilityLongName
+	, A.[site]
+	INTO #TNR_discharges_22
+	FROM ADTCMart.[ADTC].[vwAdmissionDischargeFact] as A
+	INNER JOIN #TNR_FPReportTF as T						--identify the week
+	ON A.AdjustedDischargeDate BETWEEN T.FiscalPeriodStartDate AND T.FiscalPeriodEndDate
+	LEFT JOIN DSSI.[dbo].[RH_VisibilityWall_NU_PROGRAM_MAP_ADTC] as MAP	--identify the program
+	ON A.DischargeNursingUnitCode = MAP.nursingunitcode
+	AND A.AdjustedDischargeDate BETWEEN MAP.StartDate AND MAP.EndDate
+	WHERE A.[Site]='rmd'
+	AND A.[AdjustedDischargeDate] is not null		--discharged
+	AND A.[DischargePatientServiceCode]<>'NB'		--not a new born
+	AND A.[AccountType]='I'							--inpatient at richmond only
+	AND A.[AdmissionAccountSubType]='Acute'			--subtype acute; true inpatient
+	AND LEFT(A.DischargeNursingUnitCode,1)!='M'	--excludes ('Minoru Main Floor East','Minoru Main Floor West','Minoru Second Floor East','Minoru Second Floor West','Minoru Third Floor')
+	AND A.AdjustedDischargeDate > (SELECT MIN(FiscalPeriodStartDate) FROM #TNR_FPReportTF)	--discahrges in reporting timeframe
+	;
+	GO
+
+	--links census data which has ALC information with admission/discharge information
+	IF OBJECT_ID('tempdb.dbo.#TNR_ALC_discharges_22') IS NOT NULL DROP TABLE #TNR_ALC_discharges_22;
+	GO
+
+	--pull in ALC days per case
+	SELECT C.AccountNum
+	, SUM(CASE WHEN patientservicecode like 'AL[0-9]' or patientservicecode like 'A1[0-9]' THEN 1 ELSE 0 END) as 'ALC_Days'
+	, COUNT(*) as 'Census_Days'
+	INTO #TNR_ALC_discharges_22
+	FROM ADTCMart.adtc.vwCensusFact as C
+	WHERE exists (SELECT 1 FROM #TNR_discharges_07 as Y WHERE C.AccountNum=Y.AccountNumber AND C.[Site]=Y.[Site])
+	GROUP BY C.AccountNum
+	;
+	GO
+
+	--compute and store metric
+	IF OBJECT_ID('tempdb.dbo.#TNR_ID22') IS NOT NULL DROP TABLE #TNR_ID22;
+	GO
+
+	SELECT 	'22' as 'IndicatorID'
+	, X.DischargeFacilityLongName as 'Facility'
+	, X.Program as 'Program'
+	, FiscalPeriodEndDate as 'TimeFrame'
+	, FiscalPeriodLong as 'TimeFrameLabel'
+	, 'Fiscal Period' as 'TimeFrameType'
+	, 'ALC Days based on Discharges' as 'IndicatorName'
+	, NULL as 'Numerator'
+	, COUNT(*) as 'Denominator'
+	, SUM(Y.ALC_Days) as 'Value'
+	, 'Below' as 'DesiredDirection'
+	, 'D0' as 'Format'
+	--, CASE WHEN X.FiscalPeriodEndDate between '4/1/2013' and '3/31/2014' THEN 0.099
+	--	   WHEN X.FiscalPeriodEndDate between '4/1/2014' and '3/31/2015' THEN 0.11
+	--	   WHEN X.FiscalPeriodEndDate between '4/1/2015' and '3/31/2016' THEN 0.115
+	--	   ELSE 0.115 
+	--END 
+	, CAST(NULL as float) as 'Target'
+	, 'ADTCMart' as 'DataSource'
+	, 0 as 'IsOverall'
+	, 0 as 'Scorecard_eligible'
+	, 'True North Metrics' as 'IndicatorCategory'
+	INTO #TNR_ID22
+	FROM #TNR_discharges_22 as X
+	LEFT JOIN #TNR_ALC_discharges_07 as Y
+	ON X.AccountNumber=Y.AccountNum
+	GROUP BY X.FiscalPeriodLong
+	, X.FiscalPeriodEndDate
+	, X.Program
+	, X.DischargeFacilityLongName
+	--add overall
+	UNION 
+	SELECT '22' as 'IndicatorID'
+	, X.DischargeFacilityLongName as 'Facility'
+	, 'Overall' as 'Program'
+	, FiscalPeriodEndDate as 'TimeFrame'
+	, FiscalPeriodLong as 'TimeFrameLabel'
+	, 'Fiscal Period' as 'TimeFrameType'
+	, 'ALC Days based on Discharges' as 'IndicatorName'
+	, NULL as 'Numerator'
+	, COUNT(*) as 'Denominator'
+	, SUM(Y.ALC_Days) as 'Value'
+	, 'Below' as 'DesiredDirection'
+	, 'D0' as 'Format'
+	--, CASE WHEN X.FiscalPeriodEndDate between '4/1/2013' and '3/31/2014' THEN 0.099
+	--	   WHEN X.FiscalPeriodEndDate between '4/1/2014' and '3/31/2015' THEN 0.11
+	--	   WHEN X.FiscalPeriodEndDate between '4/1/2015' and '3/31/2016' THEN 0.115
+	--	   ELSE 0.115 
+	--END 
+	, CAST(NULL as float) as 'Target'
+	, 'ADTCMart' as 'DataSource'
+	, 1 as 'IsOverall'
+	, 0 as 'Scorecard_eligible'
+	, 'True North Metrics' as 'IndicatorCategory'
+	FROM #TNR_discharges_07 as X
+	LEFT JOIN #TNR_ALC_discharges_07 as Y
+	ON X.AccountNumber=Y.AccountNum
+	GROUP BY X.FiscalPeriodLong
+	, X.FiscalPeriodEndDate
+	, X.DischargeFacilityLongName
+	;
+	GO
+
+		--ALC targets for richmond overall from BSI to match BSC, will apply to all programs
+	IF OBJECT_ID('tempdb.dbo.#TNR_ID22_targets') IS NOT NULL DROP TABLE #TNR_ID22_targets;
+	GO
+
+	SELECT LEFT(FullFiscalYear,2)+RIGHT(FullFiscalYear,2) as 'FiscalYear'
+	, CASE WHEN EntityIndicatorID = 35 THEN 'Richmond Hospital'
+		   WHEN EntityIndicatorID = 34 THEN 'Vancouver General Hospital'
+		   WHEN EntityIndicatorID = 33 THEN 'Overall'
+		   ELSE 'Unmapped'
+	END as 'Facility'
+	, [FY_YTD]/100 as 'Target'
+	INTO #TNR_ID22_targets
+	FROM BSI.[BSI].[IndicatorSummaryFact] 
+	WHERE indicatorID=5		--ALC indicator on BSC as of 20190801
+	and EntityIndicatorID=35 --richmond overall
+	and FactDataRowTypeID=2 --target data
+	AND [FY_YTD]  is not null
+	;
+	GO
+
+	-- update targets
+	UPDATE X
+	SET [Target] = ROUND(Y.[Target]*X.Denominator,0)
+	FROM #TNR_ID22 as X
+	INNER JOIN #TNR_ID22_targets as Y
+	ON X.Facility=Y.Facility	--same facility
+	AND LEFT(X.TimeFrameLabel,4) = Y.FiscalYear --same fiscal year
+	--AND X.Program=Y.Program	; no program in BSI apply blanket rate target to all services
 	;
 	GO
 
