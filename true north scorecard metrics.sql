@@ -1311,9 +1311,7 @@ DSSI.dbo.RollingFiscalYear
 	SELECT X.FiscalPeriodEndDate
 	, X.FiscalPeriodStartDate
 	, X.FiscalPeriodLong
-	, CASE WHEN X.EntityDesc ='Richmond Health Services' THEN 'Richmond Hospital'
-			ELSE NULL
-	END as 'EntityDesc'
+	, X.EntityDesc
 	, Y.LambertProgram  as 'ProgramDesc'
 	, SUM(BudgetedCensusDays) as 'BudgetedCensusDays'
 	, SUM(ActualCensusDays) as 'ActualCensusDays'
@@ -1336,7 +1334,9 @@ DSSI.dbo.RollingFiscalYear
 	GO
 	
 	SELECT '10' as 'IndicatorID'
-	, EntityDesc as 'Facility'
+	, CASE WHEN EntityDesc ='Richmond Health Services' THEN 'Richmond Hospital'
+			ELSE NULL
+	END as 'Facility'
 	, [ProgramDesc] as 'Program'
 	, FiscalPeriodEndDate as 'TimeFrame'
 	, FiscalPeriodLong as 'TimeFrameLabel'
@@ -1363,7 +1363,9 @@ DSSI.dbo.RollingFiscalYear
 	--add overall
 	UNION
 	SELECT '10' as 'IndicatorID'
-	, EntityDesc as 'Facility'
+	, CASE WHEN EntityDesc ='Richmond Health Services' THEN 'Richmond Hospital'
+			ELSE NULL
+	END as 'Facility'
 	, 'Overall' as 'Program'
 	, FiscalPeriodEndDate as 'TimeFrame'
 	, FiscalPeriodLong as 'TimeFrameLabel'
@@ -1407,7 +1409,9 @@ DSSI.dbo.RollingFiscalYear
 	GO
 
 	SELECT '11' as 'IndicatorID'
-	, EntityDesc as 'Facility'
+	, CASE WHEN EntityDesc ='Richmond Health Services' THEN 'Richmond Hospital'
+			ELSE NULL
+	END as 'Facility'
 	, [ProgramDesc] as 'Program'
 	, FiscalPeriodEndDate as 'TimeFrame'
 	, FiscalPeriodLong as 'TimeFrameLabel'
@@ -1429,7 +1433,9 @@ DSSI.dbo.RollingFiscalYear
 	--add overall indicator
 	UNION
 	SELECT '11' as 'IndicatorID'
-	, EntityDesc as 'Facility'
+	, CASE WHEN EntityDesc ='Richmond Health Services' THEN 'Richmond Hospital'
+			ELSE NULL
+	END as 'Facility'
 	, 'Overall' as 'Program'
 	, FiscalPeriodEndDate as 'TimeFrame'
 	, FiscalPeriodLong as 'TimeFrameLabel'
@@ -2050,7 +2056,9 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	
 	--by program
 	SELECT '15' as 'IndicatorID'
-	, h.EntityDesc as 'Facility'
+	, CASE WHEN h.EntityDesc ='Richmond Health Services' THEN 'Richmond Hospital'
+			ELSE NULL
+	END as 'Facility'
 	, h.ProgramDesc as 'Program'
 	, h.FiscalPeriodEndDate as 'TimeFrame'
 	, h.FiscalPeriodLong as 'TimeFrameLabel'
@@ -2080,7 +2088,9 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	--add overall
 	UNION
 	SELECT '15' as 'IndicatorID'
-	, h.EntityDesc as 'Facility'
+	, CASE WHEN h.EntityDesc ='Richmond Health Services' THEN 'Richmond Hospital'
+			ELSE NULL
+	END as 'Facility'
 	, 'Overall' as 'Program'
 	, h.FiscalPeriodEndDate as 'TimeFrame'
 	, h.FiscalPeriodLong as 'TimeFrameLabel'
@@ -2541,7 +2551,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, 'Emergency Admission Rate' as 'IndicatorName'
 	, count(distinct CASE WHEN AdmittedFlag=1 THEN VisitID ELSE NULL END) as 'Numerator'
 	, count(distinct VisitID) as 'Denominator'
-	, count(distinct VisitID) as 'Value'
+	, 1.0*count(distinct CASE WHEN AdmittedFlag=1 THEN VisitID ELSE NULL END)/count(distinct VisitID) as 'Value'
 	, 'Below' as 'DesiredDirection'
 	, 'P1' as 'Format'
 	,  NULL as 'Target'
@@ -2566,7 +2576,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, 'Emergency Admission Rate' as 'IndicatorName'
 	, count(distinct CASE WHEN AdmittedFlag=1 THEN VisitID ELSE NULL END) as 'Numerator'
 	, count(distinct VisitID) as 'Denominator'
-	, count(distinct VisitID) as 'Value'
+	, 1.0*count(distinct CASE WHEN AdmittedFlag=1 THEN VisitID ELSE NULL END)/count(distinct VisitID) as 'Value'
 	, 'Below' as 'DesiredDirection'
 	, 'P1' as 'Format'
 	, NULL as 'Target'
@@ -2840,6 +2850,76 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	;
 	GO
 
+-----------------------------------------------
+-- IDHHDASH pull indicators from the HH Dashboard
+-----------------------------------------------
+	/*
+	Purpose: To pull the indicators from the HH Dashboard
+	Author: Hans Aisake
+	Date Created: June 14, 2018
+	Date Updated: August 15, 2019
+	Inclusions/Exclusions:
+	Comments:
+
+		% RC Placements from Community
+		% of Face to Face Nursing Visits that were Ambulatory
+		% of HH Clients with an ED Visit
+		7 Day ED Revisit Rate for HH Clients
+		% HH Clients with an Acute Admission
+		% of overall hospital deaths for clients known to VCH community programs
+		Average hospital days in the last 6 months of life for clients known to VCH community programs
+		% Hospice Placements from Community
+
+	*/
+
+	--compute and store metric
+	IF OBJECT_ID('tempdb.dbo.#TNR_IDHHDASH') IS NOT NULL DROP TABLE #TNR_IDHHDASH;
+	GO
+
+	SELECT 
+	CAST (CASE	WHEN IndicatorID =1 THEN 23
+				WHEN IndicatorID =2 THEN 24
+				WHEN IndicatorID =9 THEN 25
+				WHEN IndicatorID =11 THEN 26
+				WHEN IndicatorID =12 THEN 27
+				WHEN IndicatorID =15 THEN 28
+				WHEN IndicatorID =16 THEN 29
+				WHEN IndicatorID =22 THEN 30
+				ELSE 0
+		END
+	as varchar(2)) as 'IndicatorID'
+	, CASE WHEN 'Location' ='Richmond' THEN 'Richmond Community'
+		   ELSE [Location]
+	END as 'Facility'
+	, CAST(NULL as nvarchar(4000)) as 'Program'
+	, TimeFrameEndDate as 'TimeFrame'
+	, CASE  WHEN TimeFrameType='P' THEN TimeFrame
+			WHEN TimeFrameType='Q' THEN RIGHT( TimeFrame,LEN( TimeFrame)-5)
+			ELSE ''
+	END as 'TimeFrameLabel'
+	, CASE	WHEN TimeFrameType='P' THEN 'Fiscal Period'
+			WHEN TimeFrameType='Q' THEN 'FQ HH'
+			ELSE 'Fiscal Year'
+	END as 'TimeFrameType'
+	, REPLACE(IndicatorName,'%','Percent') as 'IndicatorName'
+	, Numerator
+	, Denominator
+	, [Metric] as 'Value'
+	, DesiredDirection
+	, [Format]
+	, [Target]
+	, DataSource
+	, 1 as 'IsOverall'
+	, 0 as 'Scorecard_eligible'
+	, 'True North Metrics' as 'IndicatorCategory'
+	INTO #TNR_IDHHDASH
+	FROM DSSI.dbo.HHDASH_MasterTableAll_2 
+	WHERE indicatorId in (1,2,9,11,12,15,16,22)	--see comments
+	and locationtype='CommunityRegion'		--main criteria
+	and [Location]='Richmond'				--probably remove for a regional version
+	;
+	GO
+
 --------------------------------
 --- Consolidate Indicators 
 -------------------------------
@@ -2918,6 +2998,9 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	UNION
 	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
 	FROM #TNR_ID22
+	UNION
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	FROM #TNR_IDHHDASH
 	--add fake rows to populate summary page
 	UNION
 	SELECT TOP 1 '08', 'Richmond Hospital', 'Overall', '2020-07-25','2020-04','Fiscal Period','Discharges actual vs. predicted', NULL,NULL, NULL, 'Above','D1',NULL,'Placeholder',1,1, 'Exceptional Care'
@@ -2960,10 +3043,10 @@ refer to version 4 June if you want that back, but I can't see why you would.
 		--AND X.IndicatorName=Y.IndicatorName
 		--OR  X.indicatorID in ('08')
 		--WHERE X.Program not in ('Unknown')
-		--AND X.Scorecard_eligible=1
+		--AND 1 = (CASE WHEN @Version ='True North Scorecard' THEN X.Scorecard_eligible ELSE 1 END )
 
 
-		--mastertableall
+		----mastertableall
 		--SELECT X.*, Y.[Y-Axis_Max], Y.[Y-Axis_Min]
 		--FROM DSSI.dbo.TRUE_NORTH_RICHMOND_INDICATORS as X
 		--LEFT JOIN
@@ -2977,26 +3060,34 @@ refer to version 4 June if you want that back, but I can't see why you would.
 		--GROUP BY IndicatorID
 		--) as Y
 		--ON X.IndicatorID=Y.IndicatorID
-		--WHERE X.Scorecard_eligible=1
+		--WHERE 1 = (CASE WHEN @Version ='True North Scorecard' THEN X.Scorecard_eligible ELSE 1 END )
 
 	------------------------------------
 	-- Year over year version
 	-----------------------------------
+		IF OBJECT_ID('tempdb.dbo.#TNR_FinalUnion_Mod') is not null DROP TABLE #TNR_FinalUnion_Mod;
+		GO
+
+		SELECT * INTO #TNR_FinalUnion_Mod FROM #TNR_FinalUnion;
+		GO
+		
 
 		--add on the time frame year values
-		ALTER TABLE #TNR_FinalUnion
+		ALTER TABLE #TNR_FinalUnion_Mod
 		ADD TimeFrameYear varchar(4), TimeFrameUnit varchar(10)
 		;
 		GO
 
-		UPDATE #TNR_FinalUnion
+		UPDATE #TNR_FinalUnion_Mod
 		SET TimeFrameYear = CAsE WHEN timeFrameType='Fiscal Period'  THEN LEFT(TimeFrameLabel,4)  
-								 WHEN timeFrameType='Fiscal Quarter' THEN LEFT(TimeFrameLabel,2) 
-								 ELSE timeframeLabel 
+								 WHEN timeFrameType='Fiscal Quarter' THEN LEFT(TimeFrameLabel,4)
+								 WHEN timeFrameType='FQ HH'  THEN LEFT(TimeFrameLabel,4)  
+								 ELSE 1900
 							END
 		, TimeFrameUnit = CAsE WHEN timeFrameType='Fiscal Period'  THEN 'P'+RIGHT(TimeFrameLabel,2)  
 							   WHEN timeFrameType='Fiscal Quarter' THEN 'FQ'+RIGHT(TimeFrameLabel,2) 
-							   ELSE timeframeLabel 
+							   WHEN timeFrameType='FQ HH' THEN 'FQ'+RIGHT(TimeFrameLabel,2) 
+							   ELSE 'U'
 						  END
 		;
 		GO
@@ -3005,16 +3096,20 @@ refer to version 4 June if you want that back, but I can't see why you would.
 		IF OBJECT_ID('tempdb.dbo.#skeleton') is not null DROP TABLE #skeleton;
 		GO
 
-		SELECT *
+		SELECT X.*, Y.TimeFrameUnit
 		INTO #skeleton 
 		FROM
 		(
-		SELECT distinct IndicatorID, IndicatorName, Facility, Program, [FORMAT], DataSource, Scorecard_eligible, [TimeFrameType],  MAX(TimeFrameYear) as 'LatestYear', Cast(MAX(TimeFrameYear)-1 as varchar(4)) as 'LastYear', Cast(MAX(TimeFrameYear)-2 as varchar(4)) as 'TwoYearsAgo' 
-		FROM #TNR_FinalUnion 
+		SELECT distinct IndicatorID, IndicatorName, Facility, Program, [FORMAT], DataSource, Scorecard_eligible, [TimeFrameType]
+		, CAST( MAX(TimeFrameYear)-1 as varchar(9) ) +'/' + CAST( MAX(TimeFrameYear) as varchar(9))  as 'LatestYear'
+		, CAST( MAX(TimeFrameYear)-1 as varchar(9) ) +'/' + CAST( MAX(TimeFrameYear) as varchar(9))  as 'LastYear'
+		, CAST( MAX(TimeFrameYear)-1 as varchar(9) ) +'/' + CAST( MAX(TimeFrameYear) as varchar(9))  as 'TwoYearsAgo'
+		FROM #TNR_FinalUnion_Mod 
 		GROUP BY IndicatorID, IndicatorName, Facility, Program, [FORMAT], DataSource, Scorecard_eligible, [TimeFrameType]
 		) as X
-		CROSS JOIN
-		(SELECT distinct TimeFrameUnit FROM #TNR_FinalUnion) as Y
+		LEFT JOIN
+		(SELECT distinct IndicatorID, TimeFrameUnit FROM #TNR_FinalUnion_Mod) as Y
+		ON X.IndicatorID=Y.IndicatorID
 		;
 		GO
 
@@ -3022,14 +3117,23 @@ refer to version 4 June if you want that back, but I can't see why you would.
 		IF OBJECT_ID('tempdb.dbo.#TNR_FinalUnion2') is not null DROP TABLE #TNR_FinalUnion2;
 		GO
 
-		SELECT P.IndicatorID, P.IndicatorName, P.Facility, P.Program,P.[Format], P.DataSource, P.Scorecard_eligible, P.[TimeFrameType], P.TimeFrameUnit, P.LatestYear, P.LastYear, P.TwoYearsAgo, X.[Target], X.[Value] as 'LatestYear_Value',  Y.[Value] as 'LastYear_Value', Z.[Value] as 'TwoYearsAgo_Value'
+		SELECT P.IndicatorID
+		, Cast( P.IndicatorName as varchar(255)) as 'IndicatorName'
+		, P.Facility
+		, P.Program
+		, P.[Format]
+		, CAST( P.DataSource as varchar(255)) as 'DataSource'
+		, P.Scorecard_eligible
+		, P.[TimeFrameType], P.TimeFrameUnit
+		, P.LatestYear, P.LastYear, P.TwoYearsAgo
+		, X.[Target], X.[Value] as 'LatestYear_Value',  Y.[Value] as 'LastYear_Value', Z.[Value] as 'TwoYearsAgo_Value'
 		INTO #TNR_FinalUnion2
 		FROM #skeleton as P
-		LEFT JOIN #TNR_FinalUnion as X	--get latest year value
+		LEFT JOIN #TNR_FinalUnion_Mod as X	--get latest year value
 		ON P.IndicatorID = X.IndicatorID AND P.Facility = X.Facility AND P.Program  = X.Program AND P.LatestYear  = X.TimeFrameYear AND P.TimeFrameUnit = X.TimeFrameUnit
-		LEFT JOIN #TNR_FinalUnion as Y	--get latest year value
+		LEFT JOIN #TNR_FinalUnion_Mod as Y	--get latest year value
 		ON P.IndicatorID = Y.IndicatorID AND P.Facility = Y.Facility AND P.Program  = Y.Program AND P.LastYear    = Y.TimeFrameYear AND P.TimeFrameUnit = Y.TimeFrameUnit
-		LEFT JOIN #TNR_FinalUnion as Z	--get latest year value
+		LEFT JOIN #TNR_FinalUnion_Mod as Z	--get latest year value
 		ON P.IndicatorID = Z.IndicatorID AND P.Facility = Z.Facility AND P.Program  = Z.Program AND P.TwoYearsAgo = Z.TimeFrameYear AND P.TimeFrameUnit = Z.TimeFrameUnit
 		--WHERE X.[Value] is not null OR Y.[Value] is not null OR Z.[Value] is not null
 		;
@@ -3059,7 +3163,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 		--------------------
 		--mastertablemostrecent ; same as the time series version
 
-		----master table all
+		--master table all
 		--SELECT X.*
 		--, CASE	WHEN X.IndicatorId not in ('04') THEN ROUND(Y.[Y-Axis_Max],Y.RoundPrecision)
 		--		ELSE ROUND(Z.[Y-Axis_Max],Z.RoundPrecision) 
@@ -3074,7 +3178,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 		--	, CASE	WHEN indicatorID='01' THEN 1
 		--			ELSE MAX([Value])
 		--	END as 'Y-Axis_Max'
-		--		, CASE	WHEN indicatorID='01' THEN 0
+		--		, CASE	WHEN indicatorID in ('01','12','13') THEN 0
 		--			ELSE MIN([Value])
 		--	END as 'Y-Axis_Min'	
 		--	, CASE WHEN MAX(LEFT([FORMAT],1))='P' THEN CAST(MAX(RIGHT([FORMAT],1)) as int) +2
@@ -3099,7 +3203,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 		--	GROUP BY IndicatorID, Program
 		--) as Z
 		--ON X.IndicatorID=Z.IndicatorID AND X.Program=Z.Program
-		--WHERE X.Scorecard_eligible=1
+		--WHERE 1 = (CASE WHEN @Version ='True North Scorecard' THEN X.Scorecard_eligible ELSE 1 END )
 
 ------------
 -- END QUERY
@@ -3286,6 +3390,3 @@ refer to version 4 June if you want that back, but I can't see why you would.
 
 --	DELETE FROM #TNR_ID04 WHERE Program ='Mental Health & Addictions Ser';
 --	GO
-
-
-
