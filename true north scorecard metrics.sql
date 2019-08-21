@@ -2920,6 +2920,258 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	;
 	GO
 
+
+-----------------------------------------------
+-- ID31 Average Length of Stay of Long Length of Stay (>30 days) Patients Snapshot
+-----------------------------------------------
+	/*
+	Purpose: To compute the average length of stay of LLOS patients in the snapshot.
+	Author: Hans Aisake
+	Date Created: August 20, 2019
+	Date Updated: 
+	Inclusions/Exclusions:
+		- true inpatient records only
+		- excludes newborns
+	Comments:
+		I took the base query for indicator 471 for the BSC version FROM Emily, but modified it to be richmond specific.
+		Targets are absed on the BSI fiscal period targets. If it is a snapshot it shouldn't be directly comprable to the thursday week end.
+		It doens't match the BSc front page because they average accross several periods where as here we just show what it was for the period.
+	
+	*/
+	
+	--compute and store metric
+	IF OBJECT_ID('tempdb.dbo.#TNR_ID31') IS NOT NULL DROP TABLE #TNR_ID31;
+	GO
+
+	SELECT '31' as 'IndicatorID'
+	, FacilityLongName as 'Facility'
+	, Program as 'Program'
+	, FiscalPeriodEndDate as 'TimeFrame'
+	, FiscalPeriodLong as 'TimeFrameLabel'
+	, 'Fiscal Period' as 'TimeFrameType'
+	, 'Average Length of Stay of Long Length of Stay (>30 days) Patients Snapshot' as 'IndicatorName' 
+	, SUM(LLOSDays) as 'Numerator'
+	, COUNT(1) as 'Denominator'
+	, AVG(1.0*LLOSDays) as 'Value'
+	 , 'Below' as 'DesiredDirection'
+	, 'D1' as 'Format'
+	, CAST(NULL as float) as 'Target'
+	, 'ADTCMart' as 'DataSource'
+	, 0 as 'IsOverall'
+	, 0 as 'Scorecard_eligible'
+	, 'true North Metrics' as 'IndicatorCategory'
+	INTO #TNR_ID31
+	FROM #TNR_LLOS_data
+	GROUP BY FiscalPeriodLong
+	, FiscalPeriodEndDate
+	,Program
+	, FacilityLongName
+	--add overall
+	UNION
+	SELECT '31' as 'IndicatorID'
+	, FacilityLongName as 'Facility'
+	, 'Overall' as 'Program'
+	, FiscalPeriodEndDate as 'TimeFrame'
+	, FiscalPeriodLong as 'TimeFrameLabel'
+	, 'Fiscal Period' as 'TimeFrameType'
+	, 'Average Length of Stay of Long Length of Stay (>30 days) Patients Snapshot' as 'IndicatorName'  
+	, SUM(LLOSDays) as 'Numerator'
+	, COUNT(1) as 'Denominator'
+	, AVG(1.0*LLOSDays) as 'Value'
+	, 'Below' as 'DesiredDirection'
+	, 'D1' as 'Format'
+	, CAST(NULL as float) as 'Target'
+	, 'ADTCMart' as 'DataSource'
+	, 1 as 'IsOverall'
+	, 0 as 'Scorecard_eligible'
+	, 'True North Metrics' as 'IndicatorCategory'
+	FROM #TNR_LLOS_data
+	GROUP BY FiscalPeriodLong
+	, FiscalPeriodEndDate
+	, FacilityLongName
+	;
+	GO
+
+	----remove population and family health because it's not right for this indicator
+	--DELETE FROM #TNR_ID23 WHERE Program ='Pop & Family Hlth & Primary Cr'
+	--GO
+
+	--append 0's ; might be something wrong here
+	INSERT INTO #TNR_ID31 (IndicatorID, Facility,IndicatorName, Program,TimeFrame, TimeFrameLabel, TimeFrameType,Numerator,Denominator,[Value],DesiredDirection,[Format],[Target],DataSource,IsOverall,Scorecard_eligible, IndicatorCategory)
+	SELECT 	'31' as 'IndicatorID'
+	, p.facility
+	, p.IndicatorName
+	, P.Program
+	, P.TimeFrame
+	, P.TimeFrameLabel as 'TimeFrameLabel'
+	, 'Fiscal Period' as 'TimeFrameType'
+	, NULL as 'Numerator'
+	, NULL as 'Denominator'
+	, NULL as 'Value'
+	, 'Below' as 'DesiredDirection'
+	, 'D1' as 'Format'
+	, CAST(NULL as float) as 'Target'
+	, 'ADTCMart' as 'DataSource'
+	, CASE WHEN P.Program ='Overall' THEN 1 ELSE 0 END as 'IsOverall'
+	, 0 as 'Scorecard_eligible'
+	, 'True North Metrics' as 'IndicatorCategory'
+	FROM #placeholder as P
+	LEFT JOIN #TNR_ID31 as I
+	ON P.facility=I.Facility
+	AND P.IndicatorId=I.IndicatorID
+	AND P.Program=I.Program
+	AND P.TimeFrame=I.TimeFrame
+	WHERE P.IndicatorID= (SELECT distinct indicatorID FROM #TNR_ID31)
+	AND I.[Value] is NULL
+	;
+	GO
+
+
+-----------------------------------------------
+-- ID32 WIP WIP WIP WIP  7 day and 28 day readmission rates
+-----------------------------------------------
+	--we could combine this with an earlier indicator
+
+	--pulled from iCareMart and convert the wkend to a date; for efficiency of joins
+	IF OBJECT_ID('tempdb.dbo.#tnr_readmits') is not null DROP TABLE #tnr_readmits;
+	GO
+
+	SELECT [Facility]
+	, [GroupName]
+	, [Indicator]
+	, [Value]
+	, CONVERT(datetime, CONVERT(varchar(8),WkEnd),112) as 'ThursdayWkEnd'
+	INTO #tnr_readmits
+	FROM [ICareMart].[dbo].[icareFinalComputationsUnpivot]
+	WHERE indicator in ('Readmission28D', 'Readmission7D', 'Discharge')
+	AND facility='RHS'
+	;
+	GO
+
+	--put readmits and discharges side by side
+	IF OBJECT_ID('tempdb.dbo.#tnr_readmits2') is not null DROP TABLE #tnr_readmits2;
+	GO
+
+	SELECT X.*, Y.[Value] as 'Discharges'
+	INTO #tnr_readmits2
+	FROM #tnr_readmits as X
+	LEFT JOIN #tnr_readmits as Y
+	ON X.Facility=Y.Facility
+	AND X.GroupName=Y.GroupName
+	AND X.Indicator=Y.Indicator
+	AND X.ThursdayWkEnd= Y.ThursdayWkEnd
+	;
+	GO
+
+	--assigned fiscal periods and aggregate the data
+	IF OBJECT_ID('tempdb.dbo.#tnr_readmits2') is not null DROP TABLE #tnr_readmits2;
+	GO
+
+	SELECT D.FiscalPeriodLong
+	, facility
+	, D.FiscalPeriodStartDate
+	, D.FiscalPeriodEndDate
+	, CASE  WHEN indicator ='ReadmissionRate7D' THEN 'All Cause Readmission Rate within 7-days (excl MH and STAT)'
+			WHEN indicator = 'ReadmissionRate28D' THEN 'All Cause Readmission Rate within 28-days (excl MH and STAT)'
+			ELSE NULL
+	END as 'IndicatorName'
+	, MAP.NewProgram as 'Program'
+	, SUM([Value]) as 'NumReadmissions'
+	INTO #tnr_readmits2
+	FROM #tnr_28dreadd as X
+	INNER JOIN #TNR_FPReportTF as D
+	ON X.ThursdayWkEnd BETWEEN D.FiscalPeriodStartDate AND D.FiscalPeriodEndDate
+	INNER JOIN DSSI.dbo.RH_VisibilityWall_NU_PROGRAM_MAP_ADTC as MAP
+	ON GroupName=Map.nursingunitcode
+	AND X.ThursdayWkEnd BETWEEN MAP.StartDate AND MAP.EndDate
+	GROUP BY D.FiscalPeriodLong
+	, D.FiscalPeriodStartDate
+	, D.FiscalPeriodEndDate
+	, Facility
+	, indicator
+	, Map.NewProgram 
+	;
+
+	--compute and store metric
+	IF OBJECT_ID('tempdb.dbo.#TNR_ID09') IS NOT NULL DROP TABLE #TNR_ID09;
+	GO
+
+	SELECT '09' as 'IndicatorID'
+	, CASE WHEN facility='RHS' THEN 'Richmond Hospital' ELSE NULL END as 'Facility'
+	, Program
+	, FiscalPeriodEndDate as 'TimeFrame'
+	, FiscalPeriodLong as 'TimeFrameLabel'
+	, 'Fiscal Period' as 'TimeFrameType'
+	, IndicatorName
+	, NULL as 'Numerator'
+	, NULL as 'Denominator'
+	, [NumReadmissions] as 'Value'
+	, 'Below' as 'DesiredDirection'
+	, 'D0' as 'Format'
+	, NULL as 'Target'
+	, 'iCareMart' as 'DataSource'
+	, 0 as 'IsOverall'
+	, 1 as 'Scorecard_eligible'
+	, 'Exceptional Care' as 'IndicatorCategory'
+	INTO #TNR_ID09
+	FROM #tnr_28dreadd2
+	--add overall
+	UNION
+	SELECT '09' as 'IndicatorID'
+	, CASE WHEN facility='RHS' THEN 'Richmond Hospital' ELSE NULL END as 'Facility'
+	, 'Overall' as 'Program'
+	, FiscalPeriodEndDate as 'TimeFrame'
+	, FiscalPeriodLong as 'TimeFrameLabel'
+	, 'Fiscal Period' as 'TimeFrameType'
+	, IndicatorName
+	, NULL as 'Numerator'
+	, NULL as 'Denominator'
+	, SUM([NumReadmissions]) as 'Value'
+	, 'Below' as 'DesiredDirection'
+	, 'D0' as 'Format'
+	, 18*1.0*DATEDIFF(day,fiscalperiodstartdate, fiscalperiodenddate)/7 as 'Target'	--weekly target of iCare overall * # of weeks in the fiscsal period, won't be an int for P1 and P13.
+	, 'iCareMart' as 'DataSource'
+	, 1 as 'IsOverall'
+	, 1 as 'Scorecard_eligible'
+	, 'Exceptional Care' as 'IndicatorCategory'
+	FROM #tnr_28dreadd2
+	GROUP BY CASE WHEN facility='RHS' THEN 'Richmond Hospital' ELSE NULL END
+	, FiscalPeriodStartDate
+	, FiscalPeriodEndDate
+	, FiscalPeriodLong
+	, IndicatorName
+	;
+	GO
+
+	--compute traget using last year as a baseline average
+	IF OBJECT_ID('tempdb.dbo.#TNR_ID09_targets') is not null DROP TABLE #TNR_ID09_targets;
+	GO
+
+	SELECT LEFT(TimeFrameLabel,4) as 'FiscalYear'
+	, Facility
+	, Program
+	, AVG(Value) as 'Target'
+	INTO #TNR_ID09_targets
+	FROM #TNR_ID09
+	GROUP BY LEFT(TimeFrameLabel,4)
+	, Facility
+	, Program
+	;
+	GO
+
+	-- update targets
+	UPDATE X
+	SET X.[Target] = Y.[Target]
+	FROM #TNR_ID09 as X
+	INNER JOIN #TNR_ID09_targets as Y
+	ON X.Facility=Y.Facility	--same facility
+	AND X.Program=Y.Program		--same program
+	AND CAST(LEFT(X.TimeFrameLabel,4) as int) = CAST(Y.FiscalYear as int) +1 --last fiscal year
+	WHERE Y.[Target] is not null
+	;
+	GO
+
+
 --------------------------------
 --- Consolidate Indicators 
 -------------------------------
@@ -3001,6 +3253,9 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	UNION
 	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
 	FROM #TNR_IDHHDASH
+	UNION
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	FROM #TNR_ID31
 	--add fake rows to populate summary page
 	UNION
 	SELECT TOP 1 '08', 'Richmond Hospital', 'Overall', '2020-07-25','2020-04','Fiscal Period','Discharges actual vs. predicted', NULL,NULL, NULL, 'Above','D1',NULL,'Placeholder',1,1, 'Exceptional Care'
