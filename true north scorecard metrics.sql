@@ -1,8 +1,8 @@
 /*
-Purpose: To create a consolidated query that constructs the indciators for the true north richmond scorecard
+Purpose: To create a consolidated query that constructs the indciators for the true north richmond scorecard and the richmond true north metrics
 Author: Hans Aisake
 Date Created: April 1, 2019
-Date Modified: April 29, 2019
+Date Modified: August 21, 2019
 Inclusions/Exclusions:
 Comments:
 
@@ -2526,7 +2526,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 		ON ED.InpatientNursingUnitID= MAP.NursingUnitID			--same nursing unit id
 		AND ED.StartDate BETWEEN MAP.StartDate AND MAP.EndDate	--within mapping dates; you could argue for inpatient date, but it's a minor issue
 		WHERE ED.FacilityShortName='RHS'
-		AND ED.admittedflag=1
+		--AND ED.admittedflag=1 --need both admits and non admits
 		AND ED.StartDate >= (SELECT MIN(FiscalPeriodStartDate) FROM #TNR_FPReportTF)
 		--AND IsNACRSSubmitted ='Y'	--this is not a well known filter but it only applies to about 1/1000 ed visits; this mostly delays initial reporting for several days and I've removed it. It seams to be non-value add
 		AND not exists (SELECT 1 FROM EDMart.dbo.vwDTUDischargedHome as Z WHERE ED.continuumID=Z.ContinuumID)	--exclude clients discharged home from the DTU 
@@ -2888,7 +2888,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 				ELSE 0
 		END
 	as varchar(2)) as 'IndicatorID'
-	, CASE WHEN 'Location' ='Richmond' THEN 'Richmond Community'
+	, CASE WHEN [Location] ='Richmond' THEN 'Richmond Hospital'
 		   ELSE [Location]
 	END as 'Facility'
 	, CAST(NULL as nvarchar(4000)) as 'Program'
@@ -2919,7 +2919,6 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	and [Location]='Richmond'				--probably remove for a regional version
 	;
 	GO
-
 
 -----------------------------------------------
 -- ID31 Average Length of Stay of Long Length of Stay (>30 days) Patients Snapshot
@@ -3028,7 +3027,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 
 
 -----------------------------------------------
--- ID32 WIP WIP WIP WIP  7 day and 28 day readmission rates
+-- ID32 ID33 WIP WIP WIP WIP  7 day and 28 day readmission rates
 -----------------------------------------------
 	--we could combine this with an earlier indicator
 
@@ -3043,7 +3042,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, CONVERT(datetime, CONVERT(varchar(8),WkEnd),112) as 'ThursdayWkEnd'
 	INTO #tnr_readmits
 	FROM [ICareMart].[dbo].[icareFinalComputationsUnpivot]
-	WHERE indicator in ('Readmission28D', 'Readmission7D', 'Discharge')
+	WHERE indicator in ('Readmission28D', 'Readmission7D', 'Discharge')	--have to pull volumes so we can dervive FP rates; the table only has weekly rates
 	AND facility='RHS'
 	;
 	GO
@@ -3052,38 +3051,50 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	IF OBJECT_ID('tempdb.dbo.#tnr_readmits2') is not null DROP TABLE #tnr_readmits2;
 	GO
 
-	SELECT X.*, Y.[Value] as 'Discharges'
+	SELECT X.Facility
+	, X.GroupName
+	, X.Indicator
+	, X.ThursdayWkEnd
+	, X.[Value] as 'NumReadmits'
+	, Y.[Value] as 'Discharges'
 	INTO #tnr_readmits2
 	FROM #tnr_readmits as X
 	LEFT JOIN #tnr_readmits as Y
-	ON X.Facility=Y.Facility
-	AND X.GroupName=Y.GroupName
-	AND X.Indicator=Y.Indicator
-	AND X.ThursdayWkEnd= Y.ThursdayWkEnd
+	ON X.Facility=Y.Facility		--same facility
+	AND X.GroupName=Y.GroupName		--same group
+	AND Y.Indicator='Discharge'		--join on discharges
+	AND X.ThursdayWkEnd= Y.ThursdayWkEnd	--same week
+	WHERE X.indicator in ('Readmission28D', 'Readmission7D')	--only keep readmits from X
 	;
 	GO
 
 	--assigned fiscal periods and aggregate the data
-	IF OBJECT_ID('tempdb.dbo.#tnr_readmits2') is not null DROP TABLE #tnr_readmits2;
+	IF OBJECT_ID('tempdb.dbo.#tnr_readmits3') is not null DROP TABLE #tnr_readmits3;
 	GO
 
 	SELECT D.FiscalPeriodLong
 	, facility
 	, D.FiscalPeriodStartDate
 	, D.FiscalPeriodEndDate
-	, CASE  WHEN indicator ='ReadmissionRate7D' THEN 'All Cause Readmission Rate within 7-days (excl MH and STAT)'
-			WHEN indicator = 'ReadmissionRate28D' THEN 'All Cause Readmission Rate within 28-days (excl MH and STAT)'
+	, CASE  WHEN indicator = 'Readmission7D' THEN 'All Cause Readmission Rate within 7-days (excl MH and STAT)'
+			WHEN indicator = 'Readmission28D' THEN 'All Cause Readmission Rate within 28-days (excl MH and STAT)'
 			ELSE NULL
 	END as 'IndicatorName'
+	, CASE  WHEN indicator = 'Readmission7D' THEN '32'
+			WHEN indicator = 'Readmission28D' THEN '33'
+			ELSE NULL
+	END as 'IndicatorID'
 	, MAP.NewProgram as 'Program'
-	, SUM([Value]) as 'NumReadmissions'
-	INTO #tnr_readmits2
-	FROM #tnr_28dreadd as X
-	INNER JOIN #TNR_FPReportTF as D
-	ON X.ThursdayWkEnd BETWEEN D.FiscalPeriodStartDate AND D.FiscalPeriodEndDate
-	INNER JOIN DSSI.dbo.RH_VisibilityWall_NU_PROGRAM_MAP_ADTC as MAP
-	ON GroupName=Map.nursingunitcode
-	AND X.ThursdayWkEnd BETWEEN MAP.StartDate AND MAP.EndDate
+	, SUM([NumReadmits]) as 'Numerator'
+	, SUM([Discharges]) as 'Denominator'
+	, 1.0*SUM([NumReadmits]) / SUM([Discharges]) as 'Value'
+	INTO #tnr_readmits3
+	FROM #tnr_readmits2 as X
+	INNER JOIN #TNR_FPReportTF as D		--to get fiscal periods we want to report on
+	ON X.ThursdayWkEnd BETWEEN D.FiscalPeriodStartDate AND D.FiscalPeriodEndDate	--thursday week is a part of the period
+	INNER JOIN DSSI.dbo.RH_VisibilityWall_NU_PROGRAM_MAP_ADTC as MAP	--to map nursing units to programs
+	ON GroupName=Map.nursingunitcode		--same nursing unit
+	AND X.ThursdayWkEnd BETWEEN MAP.StartDate AND MAP.EndDate	--active mapping date for the nursing unt; from time to time they "Change" or are "moved"
 	GROUP BY D.FiscalPeriodLong
 	, D.FiscalPeriodStartDate
 	, D.FiscalPeriodEndDate
@@ -3093,50 +3104,50 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	;
 
 	--compute and store metric
-	IF OBJECT_ID('tempdb.dbo.#TNR_ID09') IS NOT NULL DROP TABLE #TNR_ID09;
+	IF OBJECT_ID('tempdb.dbo.#TNR_ID32_ID33') IS NOT NULL DROP TABLE #TNR_ID32_ID33;
 	GO
 
-	SELECT '09' as 'IndicatorID'
+	SELECT IndicatorID
 	, CASE WHEN facility='RHS' THEN 'Richmond Hospital' ELSE NULL END as 'Facility'
 	, Program
 	, FiscalPeriodEndDate as 'TimeFrame'
 	, FiscalPeriodLong as 'TimeFrameLabel'
 	, 'Fiscal Period' as 'TimeFrameType'
 	, IndicatorName
-	, NULL as 'Numerator'
-	, NULL as 'Denominator'
-	, [NumReadmissions] as 'Value'
+	, Numerator
+	, Denominator
+	, [Value]
 	, 'Below' as 'DesiredDirection'
-	, 'D0' as 'Format'
-	, NULL as 'Target'
-	, 'iCareMart' as 'DataSource'
+	, 'P1' as 'Format'
+	, CAST(NULL as float) as 'Target'
+	, 'iCareMart adjusted' as 'DataSource'
 	, 0 as 'IsOverall'
-	, 1 as 'Scorecard_eligible'
-	, 'Exceptional Care' as 'IndicatorCategory'
-	INTO #TNR_ID09
-	FROM #tnr_28dreadd2
+	, 0 as 'Scorecard_eligible'
+	, 'True North Metrics' as 'IndicatorCategory'
+	INTO #TNR_ID32_ID33
+	FROM #tnr_readmits3
 	--add overall
 	UNION
-	SELECT '09' as 'IndicatorID'
+	SELECT IndicatorID
 	, CASE WHEN facility='RHS' THEN 'Richmond Hospital' ELSE NULL END as 'Facility'
 	, 'Overall' as 'Program'
 	, FiscalPeriodEndDate as 'TimeFrame'
 	, FiscalPeriodLong as 'TimeFrameLabel'
 	, 'Fiscal Period' as 'TimeFrameType'
 	, IndicatorName
-	, NULL as 'Numerator'
-	, NULL as 'Denominator'
-	, SUM([NumReadmissions]) as 'Value'
+	, SUM(Numerator)
+	, SUM(Denominator)
+	, 1.0* SUM(Numerator)/ SUM(Denominator) as 'Value'
 	, 'Below' as 'DesiredDirection'
-	, 'D0' as 'Format'
-	, 18*1.0*DATEDIFF(day,fiscalperiodstartdate, fiscalperiodenddate)/7 as 'Target'	--weekly target of iCare overall * # of weeks in the fiscsal period, won't be an int for P1 and P13.
-	, 'iCareMart' as 'DataSource'
-	, 1 as 'IsOverall'
-	, 1 as 'Scorecard_eligible'
-	, 'Exceptional Care' as 'IndicatorCategory'
-	FROM #tnr_28dreadd2
-	GROUP BY CASE WHEN facility='RHS' THEN 'Richmond Hospital' ELSE NULL END
-	, FiscalPeriodStartDate
+	, 'P1' as 'Format'
+	, CAST(NULL as float) as 'Target'
+	, 'iCareMart adjusted' as 'DataSource'
+	, 0 as 'IsOverall'
+	, 0 as 'Scorecard_eligible'
+	, 'True North Metrics' as 'IndicatorCategory'
+	FROM #tnr_readmits3
+	GROUP BY IndicatorId
+	, CASE WHEN facility='RHS' THEN 'Richmond Hospital' ELSE NULL END
 	, FiscalPeriodEndDate
 	, FiscalPeriodLong
 	, IndicatorName
@@ -3144,16 +3155,18 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	GO
 
 	--compute traget using last year as a baseline average
-	IF OBJECT_ID('tempdb.dbo.#TNR_ID09_targets') is not null DROP TABLE #TNR_ID09_targets;
+	IF OBJECT_ID('tempdb.dbo.#TNR_ID32_ID33_targets') is not null DROP TABLE #TNR_ID32_ID33_targets;
 	GO
 
 	SELECT LEFT(TimeFrameLabel,4) as 'FiscalYear'
+	, indicatorID
 	, Facility
 	, Program
-	, AVG(Value) as 'Target'
-	INTO #TNR_ID09_targets
-	FROM #TNR_ID09
+	, 1.0*SUM(numerator)/SUM(denominator) as 'Target'
+	INTO #TNR_ID32_ID33_targets
+	FROM #TNR_ID32_ID33
 	GROUP BY LEFT(TimeFrameLabel,4)
+	, indicatorID
 	, Facility
 	, Program
 	;
@@ -3162,12 +3175,153 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	-- update targets
 	UPDATE X
 	SET X.[Target] = Y.[Target]
-	FROM #TNR_ID09 as X
-	INNER JOIN #TNR_ID09_targets as Y
+	FROM #TNR_ID32_ID33 as X
+	INNER JOIN #TNR_ID32_ID33_targets as Y
 	ON X.Facility=Y.Facility	--same facility
 	AND X.Program=Y.Program		--same program
+	AND X.IndicatorID=Y.IndicatorID
 	AND CAST(LEFT(X.TimeFrameLabel,4) as int) = CAST(Y.FiscalYear as int) +1 --last fiscal year
 	WHERE Y.[Target] is not null
+	;
+	GO
+
+-----------------------------------------------
+-- ID34 WIP WIP WIP Average Number of Acute Mental Health Beds Occupied
+-----------------------------------------------
+	/*
+	Purpose: To compute the average number of acute mental health beds occupied.
+	Author: Hans Aisake
+	Date Created: August 20, 2019
+	Date Updated: 
+	Inclusions/Exclusions:
+		- true inpatient records only
+		- excludes newborns
+	Comments:
+		- average census in RPEU and R2W / # of funded beds
+	
+	*/
+
+	--create a table with the funded bed numbers for mental health
+	IF OBJECT_ID('tempdb.dbo.#TNR_MHSU_FundedBeds') is not null DROP TABLE #TNR_MHSU_FundedBeds;
+	GO
+
+	CREATE TABLE #TNR_MHSU_FundedBeds
+	( FiscalYear int
+	  , FAcility varchar(255)
+	  , NursingUnitCode varchar(10)
+	  , FundedBeds int
+	)
+	GO
+
+	-- R2W has had 18 beds for a long time
+	-- RPEU has had 4 beds for a long time
+	INSERT INTO #TNR_MHSU_FundedBeds VALUES
+	(2020, 'Richmond Hospital', 'R2W',18),
+	(2020, 'Richmond Hospital', 'RPEU',4),
+	(2019, 'Richmond Hospital', 'R2W',18),
+	(2019, 'Richmond Hospital', 'RPEU',4),
+	(2018, 'Richmond Hospital', 'R2W',18),
+	(2018, 'Richmond Hospital', 'RPEU',4),
+	(2017, 'Richmond Hospital', 'R2W',18),
+	(2017, 'Richmond Hospital', 'RPEU',4),
+	(2016, 'Richmond Hospital', 'R2W',18),
+	(2016, 'Richmond Hospital', 'RPEU',4)
+	;
+	GO
+
+	--pull census from R2W and RPEU and compute the average census per period	
+	IF OBJECT_ID('tempdb.dbo.#TNR_MHSU_Census') is not null DROP TABLE #TNR_MHSU_Census;
+	GO
+
+	--get census of RPEU and R2W
+	SELECT '34' as 'IndicatorID'
+	, FacilityLongName as 'Facility'
+	, Map.NewProgram as 'Program'
+	, D.FiscalPeriodEndDate as 'TimeFrame'
+	, D.FiscalPeriodLong as 'TimeFrameLabel'
+	, 'Fiscal Period' as 'TimeFrameType'
+	, 'Average Number of Acute Mental Health Beds Occupied' as 'IndicatorName' 
+	, SUM(1) as 'Numerator'
+	, DATEDIFF(day, MAX(D.fiscalperiodstartdate), MAX(D.fiscalperiodenddate) ) +1 as 'Denominator'
+	, CEILING(1.0*SUM(1) / DATEDIFF(day, MAX(D.fiscalperiodstartdate), MAX(D.fiscalperiodenddate) ) ) as 'Value'
+	, 'Below' as 'DesiredDirection'
+	, 'D0' as 'Format'
+	, CAST(NULL as float) as 'Target'	--funded beds
+	, 'ADTCMart' as 'DataSource'
+	, 0 as 'IsOverall'
+	, 0 as 'Scorecard_eligible'
+	, 'True North Metrics' as 'IndicatorCategory' 
+	INTO #TNR_MHSU_Census
+	FROM ADTCMart.adtc.vwCensusFact as ADTC
+	LEFT JOIN DSSI.dbo.RH_VisibilityWall_NU_PROGRAM_MAP_ADTC as MAP
+	ON ADTC.CensusDate BETWEEN MAP.StartDate AND MAP.EndDate		--active map dates
+	AND ADTC.NursingUnitCode=MAP.nursingunitcode	--same nursing unit
+	INNER JOIN #tnr_periods as D
+	ON ADTC.CensusDate BETWEEN D.FiscalPeriodStartDate AND D.FiscalPeriodEndDate
+	WHERE ADTC.nursingunitcode in ('RPEU','R2W') --mental health units only
+	AND ADTC.[Site]='RMD'
+	AND ADTC.AccountType in ('I', 'Inpatient', '391')	--the code is different for each facility. Richmond is Inpatient
+	AND ADTC.AccountSubtype in ('Acute')				--no exclusions other than inpatient
+	GROUP BY ADTC.FacilityLongName
+	, Map.NewProgram
+	, D.FiscalPeriodEndDate
+	, D.FiscalPeriodLong 
+	;
+	GO
+
+	--add funded bed target levels
+	UPDATE X
+	SET [Target] = Y.FundedBeds
+	FROM #TNR_MHSU_Census as X
+	LEFT JOIN (	SELECT FiscalYear, Facility, SUM(FundedBeds) as 'FundedBeds' 
+				FROM #TNR_MHSU_FundedBeds
+				GROUP BY FiscalYear, Facility) as Y
+	ON CAST(LEFT(X.TimeFrameLabel,4) as int) = Y.FiscalYear		--same year
+	AND X.Facility=Y.Facility --same facility
+	;
+	GO
+	
+	--compute and store metric
+	IF OBJECT_ID('tempdb.dbo.#TNR_ID34') IS NOT NULL DROP TABLE #TNR_ID34;
+	GO
+
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, TimeFrameType, IndicatorName, Numerator, Denominator, [Value], DesiredDirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	INTO #TNR_ID34
+	FROM #TNR_MHSU_Census
+	UNION
+	SELECT IndicatorID, Facility, 'Overall' as 'Program', TimeFrame, TimeFrameLabel, TimeFrameType, IndicatorName, SUM(Numerator), SUM(Denominator), 1.0*SUM(Numerator)/SUM(Denominator), DesiredDirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	FROM #TNR_MHSU_Census
+	GROUP BY IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, TimeFrameType, IndicatorName, DesiredDirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	;
+	GO
+
+--------------------------------
+-- ID placeholder
+--------------------------------
+
+	IF OBJECT_ID('tempdb.dbo.#TNR_FAKE') is not null DROP TABLE #TNR_FAKE;
+	GO
+
+	--Create a data set to hold the placeholder indicator rows for the summary page etc..
+	SELECT TOP 1 '08' as 'IndicatorID'
+	, 'Richmond Hospital' as 'Facility'
+	, 'Overall' as 'Program'
+	, MAX(TimeFrame) as 'TimeFrame'
+	, MAX(TimeFrameLabel) as 'TimeFrameLabel'
+	, 'Fiscal Period' as 'TimeFrameType'
+	, 'Discharges actual vs. predicted' as 'IndicatorName'
+	, CAST(NULL as float) as 'Numerator'
+	, CAST(NULL as float) as 'Denominator'
+	, CAST(NULL as float) as 'Value'
+	, 'Above' as 'DesiredDirection'
+	, 'D1' as 'Format'
+	, CAST(NULL as float) as 'Target'
+	, 'Placeholder' as 'DataSource'
+	, 1 as 'IsOverall'
+	, 1 as 'Scorecard_eligible'
+	, 'Exceptional Care' as 'IndicatorCategory'
+	INTO #TNR_FAKE
+	FROM #TNR_ID01
 	;
 	GO
 
@@ -3256,12 +3410,19 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	UNION
 	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
 	FROM #TNR_ID31
+	UNION
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	FROM #TNR_ID32_ID33
+	UNION
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	FROM #TNR_ID34
 	--add fake rows to populate summary page
 	UNION
-	SELECT TOP 1 '08', 'Richmond Hospital', 'Overall', '2020-07-25','2020-04','Fiscal Period','Discharges actual vs. predicted', NULL,NULL, NULL, 'Above','D1',NULL,'Placeholder',1,1, 'Exceptional Care'
-	FROM #TNR_ID01
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	FROM #TNR_FAKE
 	;
 	GO
+
 	
 	-----------------------------------
 	-- Timeseries version
@@ -3326,8 +3487,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 		SELECT * INTO #TNR_FinalUnion_Mod FROM #TNR_FinalUnion;
 		GO
 		
-
-		--add on the time frame year values
+			--add on the time frame year values
 		ALTER TABLE #TNR_FinalUnion_Mod
 		ADD TimeFrameYear varchar(4), TimeFrameUnit varchar(10)
 		;
@@ -3356,9 +3516,12 @@ refer to version 4 June if you want that back, but I can't see why you would.
 		FROM
 		(
 		SELECT distinct IndicatorID, IndicatorName, Facility, Program, [FORMAT], DataSource, Scorecard_eligible, [TimeFrameType]
-		, CAST( MAX(TimeFrameYear)-1 as varchar(9) ) +'/' + CAST( MAX(TimeFrameYear) as varchar(9))  as 'LatestYear'
-		, CAST( MAX(TimeFrameYear)-1 as varchar(9) ) +'/' + CAST( MAX(TimeFrameYear) as varchar(9))  as 'LastYear'
-		, CAST( MAX(TimeFrameYear)-1 as varchar(9) ) +'/' + CAST( MAX(TimeFrameYear) as varchar(9))  as 'TwoYearsAgo'
+		, CAST(MAX(TimeFrameYear) as int) as 'LatestYear'
+		, MAX(TimeFrameYear) -1  as 'LastYear'
+		, MAX(TimeFrameYear) -2  as 'TwoYearsAgo'
+		, CAST( MAX(TimeFrameYear)-1 as varchar(9) ) +'/' + CAST( MAX(TimeFrameYear) as varchar(9))  as 'LatestYearLabel'
+		, CAST( MAX(TimeFrameYear)-2 as varchar(9) ) +'/' + CAST( MAX(TimeFrameYear)-1 as varchar(9))  as 'LastYearLabel'
+		, CAST( MAX(TimeFrameYear)-3 as varchar(9) ) +'/' + CAST( MAX(TimeFrameYear)-2 as varchar(9))  as 'TwoYearsAgoLabel'
 		FROM #TNR_FinalUnion_Mod 
 		GROUP BY IndicatorID, IndicatorName, Facility, Program, [FORMAT], DataSource, Scorecard_eligible, [TimeFrameType]
 		) as X
@@ -3367,6 +3530,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 		ON X.IndicatorID=Y.IndicatorID
 		;
 		GO
+
 
 		--manipulate the structure into an excel like structure 
 		IF OBJECT_ID('tempdb.dbo.#TNR_FinalUnion2') is not null DROP TABLE #TNR_FinalUnion2;
@@ -3379,8 +3543,14 @@ refer to version 4 June if you want that back, but I can't see why you would.
 		, P.[Format]
 		, CAST( P.DataSource as varchar(255)) as 'DataSource'
 		, P.Scorecard_eligible
-		, P.[TimeFrameType], P.TimeFrameUnit
-		, P.LatestYear, P.LastYear, P.TwoYearsAgo
+		, P.[TimeFrameType]
+		, P.TimeFrameUnit
+		, P.LatestYear
+		, P.LastYear
+		, P.TwoYearsAgo
+		, P.LatestYearLabel
+		, P.LastYearLabel
+		, P.TwoYearsAgoLabel
 		, X.[Target], X.[Value] as 'LatestYear_Value',  Y.[Value] as 'LastYear_Value', Z.[Value] as 'TwoYearsAgo_Value'
 		INTO #TNR_FinalUnion2
 		FROM #skeleton as P
@@ -3408,10 +3578,11 @@ refer to version 4 June if you want that back, but I can't see why you would.
 		TRUNCATE TABLE DSSI.[dbo].[TRUE_NORTH_RICHMOND_INDICATORS_YOY] ;
 		GO
 
-		INSERT INTO DSSI.[dbo].[TRUE_NORTH_RICHMOND_INDICATORS_YOY] ([IndicatorID],IndicatorName, [Facility], [Program], [FORMAT], DataSource, Scorecard_eligible, [TimeFrameType], [TimeFrameUnit], LatestYear, LastYear, TwoYearsAgo, [Target], [LatestYear_Value], [LastYear_Value], [TwoYearsAgo_Value] )
+		INSERT INTO DSSI.[dbo].[TRUE_NORTH_RICHMOND_INDICATORS_YOY] ([IndicatorID],IndicatorName, [Facility], [Program], [FORMAT], DataSource, Scorecard_eligible, [TimeFrameType], [TimeFrameUnit], LatestYear, LastYear, TwoYearsAgo, LatestYearLabel, LastYearLabel, TwoYearsAgoLabel, [Target], [LatestYear_Value], [LastYear_Value], [TwoYearsAgo_Value] )
 		SELECT * FROM #TNR_FinalUnion2 
 		;
 		GO
+
 
 		--------------------
 		-- For YOY version
