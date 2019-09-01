@@ -27,7 +27,7 @@ DSSI.dbo.RollingFiscalYear
 	IF OBJECT_ID('tempdb.dbo.#tnr_periods') IS NOT NULL DROP TABLE #tnr_periods;
 	GO
 
-	SELECT distinct TOP 53 FiscalPeriodLong, fiscalperiodstartdate, fiscalperiodenddate, FiscalPeriodEndDateID, FiscalPeriod, FiscalYearLong
+	SELECT distinct TOP 53 FiscalPeriodLong, fiscalperiodstartdate, fiscalperiodenddate, FiscalPeriodEndDateID, FiscalPeriod, FiscalYearLong, FiscalYear
 	INTO #tnr_periods
 	FROM ADTCMart.dim.[Date]
 	WHERE fiscalperiodenddate <= DATEADD(day, -1, GETDATE())
@@ -2444,7 +2444,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, FiscalPeriodEndDate as 'TimeFrame'
 	, FiscalPeriodLong as 'TimeFrameLabel'
 	, 'Fiscal Period' as 'TimeFrameType'
-	, 'Nuber of Emergency Visits' as 'IndicatorName'
+	, 'Number of Emergency Visits' as 'IndicatorName'
 	, NULL as 'Numerator'
 	, NULL as 'Denominator'
 	, count(distinct VisitID) as 'Value'
@@ -2469,7 +2469,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, FiscalPeriodEndDate as 'TimeFrame'
 	, FiscalPeriodLong as 'TimeFrameLabel'
 	, 'Fiscal Period' as 'TimeFrameType'
-	, 'Nuber of Emergency Visits' as 'IndicatorName'
+	, 'Number of Emergency Visits' as 'IndicatorName'
 	, NULL as 'Numerator'
 	, NULL as 'Denominator'
 	, count(distinct VisitID) as 'Value'
@@ -3295,6 +3295,211 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	;
 	GO
 
+-----------------------------------------------
+-- ID35 % of Surgical Cases booked “In Turn” (FIFO) 
+-----------------------------------------------
+	/*
+	Purpose: Pull Number of Surgical Cases Booked "In Turn" (FIFO)
+	Author: Hans Aisake
+	Date Created: 2019 August 28
+	Date Modified: 
+	Comments: Program is the surgery program or overall
+	*/
+
+	SELECT TOP 10 * FROM ADTCMart.dim.[date] WHERE FiscalPeriodEndDate < GETDATE() ORDER BY FiscalPeriodEndDAte DESC
+
+	
+
+	FiscalYear
+
+	ZZXXZZ
+
+	--pull census from R2W and RPEU and compute the average census per period	
+	IF OBJECT_ID('tempdb.dbo.#TNR_ID35') is not null DROP TABLE #TNR_ID35;
+	GO
+
+	--get census of RPEU and R2W
+	SELECT '35' as 'IndicatorID'
+	, [Site] as 'Facility'
+	, (SELECT distinct program FROM #TNR_ID01 WHERE program like '%surg%') as 'Program'
+	, D.FiscalPeriodEndDate as 'TimeFrame'
+	, D.FiscalPeriodLong as 'TimeFrameLabel'
+	, 'Fiscal Period' as 'TimeFrameType'
+	, 'Average Number of Acute Mental Health Beds Occupied' as 'IndicatorName' 
+	, SUM(1) as 'Numerator'
+	, DATEDIFF(day, MAX(D.fiscalperiodstartdate), MAX(D.fiscalperiodenddate) ) +1 as 'Denominator'
+	, CEILING(1.0*SUM(1) / DATEDIFF(day, MAX(D.fiscalperiodstartdate), MAX(D.fiscalperiodenddate) ) ) as 'Value'
+	, 'Below' as 'DesiredDirection'
+	, 'D0' as 'Format'
+	, CAST(NULL as float) as 'Target'	--funded beds
+	, 'ADTCMart' as 'DataSource'
+	, 0 as 'IsOverall'
+	, 0 as 'Scorecard_eligible'
+	, 'True North Metrics' as 'IndicatorCategory' 
+	INTO #TNR_ID35
+	FROM DSSI.[dbo].[TRUE_NORTH_SURGERY_LIGHTHOUSE] as S
+	INNER JOIN #tnr_periods as D
+	ON RIGHT(S.FiscalYear,4) = D.FiscalYear	--same fiscal year
+	AND S.FiscalPeriod=D.FiscalPeriod --same fiscal period
+	WHERE S.[Site]=Richmond 
+	AND S.indicatorNAme ='stuff'
+
+	(SELECT distinct program FROM #TNR_ID01 WHERE program like '%surg%')
+
+	
+
+
+
+	
+-----------------------------------------------
+-- IDXX Number of Falls - Degree of Harm (2-5), No Harm (1), overall (1-5)
+-----------------------------------------------
+	/*
+	Purpose: Pull Number of Falls for the true north metrics
+	Author: Hans Aisake
+	Co-author: Peter Kaloupis
+	Date Created: 2019 August 26
+	Date Modified: 
+	Comments: Programs are bassed on nursing units Updated programs and put them in a mapping table in DSSI.
+	*/
+
+	--identify the time frames for the falls. Data comes by month and year, so I'm going to report it by month and year. Mapping it to FP is disingenuous
+	IF OBJECT_ID('tempdb.dbo.#TNR_falls_tf') IS NOT NULL DROP TABLE #TNR_falls_tf;	
+	GO
+
+	SELECT distinct TOP 48 [Year], [Month]
+	INTO #TNR_falls_tf
+	FROM [DSSI].[dbo].[RHFallsVisibilityWall]	--is null need to get this data back again.
+	ORDER BY [Year] DESC, [Month] DESC
+	;
+	GO
+
+	--identify types of harm
+	IF OBJECT_ID('tempdb.dbo.#TNR_falls_harmtypes') IS NOT NULL DROP TABLE #TNR_falls_harmtypes; 
+	GO
+
+	CREATE TABLE #TNR_falls_harmtypes ( HarmFlag varchar(25));
+	INSERT INTO #TNR_falls_harmtypes 	VALUES ('Harm'),('NoHarm'); 
+	GO
+
+	--create place holder table to house falls
+	IF OBJECT_ID('tempdb.dbo.#TNR_falls_groupings') IS NOT NULL DROP TABLE #TNR_falls_groupings; 
+	GO
+
+	SELECT T.*,P.*,H.* 	
+	INTO #TNR_falls_groupings
+	FROM #TNR_falls_tf as T
+	CROSS JOIN  	(SELECT distinct [Director Programs] as 'Program' FROM DSSI.[dbo].[RH_VisibilityWall_QPS_FallsProgramMap]) as P
+	CROSS JOIN  	(SELECT * FROM #TNR_falls_harmtypes ) as H
+	;
+	GO
+
+
+	--count number of falls resulting in harm or not harm by program
+	IF OBJECT_ID('tempdb.dbo.#TNR_falls') IS NOT NULL DROP TABLE #TNR_falls;
+	GO
+
+	SELECT M.[Director Programs] as 'Program'
+	,CASE WHEN F.[Degree of Harm] in ('1 - No harm', 'Not Applicable') then 'No Harm (NA & 1)' 
+		  ELSE 'Degree of Harm (2-5)' 
+	END as 'HarmFlag'
+	, [Year]
+	, [Month]
+	, COUNT(*) as 'NumFallsCases'
+	INTO #TNR_falls
+	FROM [DSSI].[dbo].[RHFallsVisibilityWall] as F
+	LEFT JOIN DSSI.[dbo].[RH_VisibilityWall_QPS_FallsProgramMap] as M
+	ON F.[Responsible Program]=M.[Falls Responsible Programs]
+	WHERE F.[Originated HSDA]='richmond'
+	GROUP BY M.[Director Programs]
+	,CASE WHEN F.[Degree of Harm] in ('1 - No harm','Not Applicable') then 'No Harm (NA & 1)' 
+		  ELSE 'Degree of Harm (2-5)' 
+	END
+	, [Year]
+	, [Month]
+	;
+	GO
+
+	--compute falls data set
+	IF OBJECT_ID('tempdb.dbo.#TNR_IDXX_Falls') is not null DROP TABLE #TNR_IDXX_Falls;
+	GO
+
+	--add harm
+	SELECT 
+	'Richmond' as 'Facility' 
+	, R.Program
+	, R.[Year]
+	, R.[Month]
+	, 'Degree of Harm (2-5)'  as 'HarmFlag'
+	, ISNULL(F.NumFallsCases,0) as 'Value'
+	INTO #TNR_IDXX_Falls
+	FROM #TNR_falls_groupings as R
+	LEFT JOIN #TNR_falls as F
+	ON R.[program]=F.[Program]
+	AND R.[HarmFlag]=F.[HarmFlag]
+	AND R.[Year] = F.[Year] 
+	AND R.[Month] = F.[Month]
+	WHERE R.HarmFlag='Degree of Harm (2-5)' 
+	-- add overall harm
+	UNION
+	SELECT
+	'Richmond' as 'Facility' 
+	, 'Overall' as 'Program'
+	, R.[Year]
+	, R.[Month]
+	, 'Degree of Harm (2-5)'  as 'HarmFlag'
+	, SUM(ISNULL(F.NumFallsCases,0)) as 'Value'
+	FROM (SELECT distinct [Year], [Month], [HarmFlag] FROM #TNR_falls_groupings WHERE [HarmFlag]='Degree of Harm (2-5)' ) as R	--just distinct years, months, and harm
+	LEFT JOIN #TNR_falls as F
+	ON R.[HarmFlag]=F.[HarmFlag]
+	AND R.[Year] = F.[Year] 
+	AND R.[Month] = F.[Month]
+	GROUP BY  R.[Year]
+	, R.[Month]
+	--add no harm
+	UNION
+	SELECT 'Richmond' as 'Facility' 
+	, R.Program
+	, R.[Year]
+	, R.[Month]
+	, 'No Harm (NA & 1)' as 'HarmFlag'
+	, ISNULL(F.NumFallsCases,0) as 'Value'
+	FROM #TNR_falls_groupings as R
+	LEFT JOIN #TNR_falls as F
+	ON R.[program]=F.[Program]
+	AND R.[HarmFlag]=F.[HarmFlag]
+	AND R.[Year] = F.[Year] 
+	AND R.[Month] = F.[Month]
+	WHERE R.HarmFlag='No Harm (NA & 1)'
+	-- add overall no harm
+	UNION
+	SELECT 'Richmond' as 'Facility' 
+	, 'Overall' as 'Program'
+	, R.[Year]
+	, R.[Month]
+	, 'No Harm (NA & 1)' as 'HarmFlag'
+	, SUM(ISNULL(F.NumFallsCases,0)) as 'Value'
+	FROM (SELECT distinct [Year], [Month], [HarmFlag] FROM #TNR_falls_groupings WHERE [HarmFlag]='No Harm (NA & 1)') as R	--just distinct years, months, and harm
+	LEFT JOIN #TNR_falls as F
+	ON R.[HarmFlag]=F.[HarmFlag]
+	AND R.[Year] = F.[Year] 
+	AND R.[Month] = F.[Month]
+	GROUP BY  R.[Year]
+	, R.[Month]
+	;
+	GO
+
+	--put data into a falls table
+	TRUNCATE TABLE DSSI.dbo.TRUE_NORTH_RICHMOND_FALLS; 
+	GO
+
+	INSERT INTO DSSI.dbo.TRUE_NORTH_RICHMOND_FALLS ( Facility, [Program], [year], [Month], [HarmFlag], [Value])
+	SELECT Facility, [Program], [year], [Month], [HarmFlag], [Value]
+	FROM #TNR_IDXX_Falls
+	;
+	GO
+
+	
 --------------------------------
 -- ID placeholder
 --------------------------------
