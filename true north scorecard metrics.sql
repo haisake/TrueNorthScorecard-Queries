@@ -700,11 +700,12 @@ DSSI.dbo.RollingFiscalYear
 	AND (ADTC.HealthAuthorityName = 'Vancouver Coastal' -- only include residents of Vancouver Coastal
 	OR (ADTC.HealthAuthorityName = 'Unknown BC' AND (ADTC.IsHomeless = '1' OR ADTC.IsHomeless_PHC = '1'))) -- Include Unknown BC homeless population
 	AND ADTC.[Site] ='rmd'									--only include census at Richmond
+	AND LEFT(ADTC.NursingUnitCode,1)!='M'	--excludes ('Minoru Main Floor East','Minoru Main Floor West','Minoru Second Floor East','Minoru Second Floor West','Minoru Third Floor')
 	AND ADTC.AccountType in ('I', 'Inpatient', '391')		--the code is different for each facility. Richmond is Inpatient
 	AND ADTC.AccountSubtype in ('Acute')					--the true inpatient classification is different for each site. This is the best guess for Richmond
 	;
 	GO
-	
+
 	--compute and store metric
 	IF OBJECT_ID('tempdb.dbo.#TNR_ID05') IS NOT NULL DROP TABLE #TNR_ID05;
 	GO
@@ -756,10 +757,6 @@ DSSI.dbo.RollingFiscalYear
 	, FiscalPeriodEndDate
 	, FacilityLongName
 	;
-	GO
-
-	--remove population and family health because it's not right for this indicator
-	DELETE FROM #TNR_ID05 WHERE Program ='Pop & Family Hlth & Primary Cr'
 	GO
 
 	--append 0's ; might be something wrong here
@@ -822,7 +819,6 @@ DSSI.dbo.RollingFiscalYear
 	AND X.TimeFrameLAbel=Y.TimeFrameLabel
 	WHERE Y.[Target] is not null
 	;
-
 		
 -----------------------------------------------
 -- ID06 Discharged Long Length of Stay (> 30 days) patient days excludes newborns
@@ -3952,6 +3948,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	IF OBJECT_ID('tempdb.dbo.#TNR_ID40') IS NOT NULL DROP TABLE #TNR_ID40;
 	GO
 
+	--services by hospitalist, IM, etc....
 	SELECT 	'40' as 'IndicatorID'
 	, Facility
 	, Medical_Service as 'Program'
