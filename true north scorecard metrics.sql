@@ -864,9 +864,9 @@ DSSI.dbo.RollingFiscalYear
 	ON ADTC.DischargeNursingUnitCode=MAP.nursingunitcode		--same code
 	AND ADTC.AdjustedDischargeDate BETWEEN MAP.StartDate AND MAP.EndDate	--unit program mapping dates
 	WHERE ADTC.[site]='rmd'	--richmond only
-	--AND (ADTC.HealthAuthorityName = 'Vancouver Coastal' -- only include residents of Vancouver Coastal
-	--	OR (ADTC.HealthAuthorityName = 'Unknown BC' AND (ADTC.IsHomeless = '1' OR ADTC.IsHomeless_PHC = '1'))
-	--	) -- Include Unknown BC homeless population
+	AND (ADTC.HealthAuthorityName = 'Vancouver Coastal' -- only include residents of Vancouver Coastal
+		OR (ADTC.HealthAuthorityName = 'Unknown BC' AND (ADTC.IsHomeless = '1' OR ADTC.IsHomeless_PHC = '1'))
+	) -- Include Unknown BC homeless population
 	and ADTC.[AdjustedDischargeDate] is not null	--must have a discharge date
 	and ADTC.DischargeAge > 1						-- only patients older than 1; replaces the new born criterion.
 	and ADTC.[AccountType] in ('I','Inpatient','391')	--inpatient cases only
