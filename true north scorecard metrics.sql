@@ -2688,7 +2688,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 -- ID22 ALC Days
 -----------------------------------------------
 	/*
-	Purpose: To compute how many inpatient days were ALC there were.
+	Purpose: To compute how many census inpatient days in the period were ALC 
 	Author: Hans Aisake
 	Date Created: June 14, 2018
 	Date Updated: Jan 3, 2020
@@ -2699,46 +2699,33 @@ refer to version 4 June if you want that back, but I can't see why you would.
 		-fix references to ALC 22 instead of ALC 07 on Jan 3, 2020.
 	*/
 
-	--links census data which has ALC information with admission/discharge information
-	IF OBJECT_ID('tempdb.dbo.#TNR_discharges_22') IS NOT NULL DROP TABLE #TNR_discharges_22;
-	GO
-
-	SELECT AccountNumber
-	, T.FiscalPeriodLong
-	, T.FiscalPeriodEndDate
-	, A.DischargeNursingUnitDesc
-	, ISNULL(MAP.NewProgram,'Unknown') as 'Program'
-	, A.DischargeFacilityLongName
-	, A.[site]
-	INTO #TNR_discharges_22
-	FROM ADTCMart.[ADTC].[vwAdmissionDischargeFact] as A
-	INNER JOIN #TNR_FPReportTF as T						--identify the week
-	ON A.AdjustedDischargeDate BETWEEN T.FiscalPeriodStartDate AND T.FiscalPeriodEndDate
-	LEFT JOIN DSSI.[dbo].[RH_VisibilityWall_NU_PROGRAM_MAP_ADTC] as MAP	--identify the program
-	ON A.DischargeNursingUnitCode = MAP.nursingunitcode
-	AND A.AdjustedDischargeDate BETWEEN MAP.StartDate AND MAP.EndDate
-	WHERE A.[Site]='rmd'
-	AND A.[AdjustedDischargeDate] is not null		--discharged
-	AND A.[DischargePatientServiceCode]<>'NB'		--not a new born
-	AND A.[AccountType] in ('I','Inpatient','391')	--inpatient at richmond is 'I'
-	AND A.[AdmissionAccountSubType]='Acute'			--subtype acute; true inpatient
-	AND LEFT(A.DischargeNursingUnitCode,1)!='M'	--excludes ('Minoru Main Floor East','Minoru Main Floor West','Minoru Second Floor East','Minoru Second Floor West','Minoru Third Floor')
-	--AND A.AdjustedDischargeDate > (SELECT MIN(FiscalPeriodStartDate) FROM #TNR_FPReportTF)	--discahrges in reporting timeframe
-	;
-	GO
-
-	--links census data which has ALC information with admission/discharge information
-	IF OBJECT_ID('tempdb.dbo.#TNR_ALC_discharges_22') IS NOT NULL DROP TABLE #TNR_ALC_discharges_22;
+	--find alc days in the census
+	IF OBJECT_ID('tempdb.dbo.#TNR_ALC_days_22') IS NOT NULL DROP TABLE #TNR_ALC_days_22;
 	GO
 
 	--pull in ALC days per case
-	SELECT C.AccountNum
+	SELECT T.FiscalPeriodLong
+	, T.FiscalPeriodEndDate
+	, C.FacilityLongName
+	, ISNULL(MAP.NewProgram,'Unknown') as 'Program'
 	, SUM(CASE WHEN patientservicecode like 'AL[0-9]' or patientservicecode like 'A1[0-9]' THEN 1 ELSE 0 END) as 'ALC_Days'
-	, COUNT(*) as 'Census_Days'
-	INTO #TNR_ALC_discharges_22
+	, COUNT(C.AccountNum) as 'Census_Days'
+	INTO #TNR_ALC_days_22
 	FROM ADTCMart.adtc.vwCensusFact as C
-	WHERE exists (SELECT 1 FROM #TNR_discharges_22 as Y WHERE C.AccountNum=Y.AccountNumber AND C.[Site]=Y.[Site])	--discharges satisfying the criterion
-	GROUP BY C.AccountNum
+	INNER JOIN #TNR_FPReportTF as T						--identify the week
+	ON C.CensusDate BETWEEN T.FiscalPeriodStartDate AND T.FiscalPeriodEndDate
+	LEFT JOIN DSSI.[dbo].[RH_VisibilityWall_NU_PROGRAM_MAP_ADTC] as MAP	--identify the program
+	ON C.NursingUnitCode = MAP.nursingunitcode
+	AND C.CensusDate BETWEEN MAP.StartDate AND MAP.EndDate
+	WHERE C.[Site]='rmd'				--richmond only
+	AND C.[PatientServiceCode]<>'NB'		--not a new born
+	AND C.[AccountType] in ('I','Inpatient','391')	--inpatient at richmond is 'I'
+	AND C.[AccountSubType]='Acute'			--subtype acute; true inpatient
+	AND LEFT(C.NursingUnitCode,1)!='M'	--excludes ('Minoru Main Floor East','Minoru Main Floor West','Minoru Second Floor East','Minoru Second Floor West','Minoru Third Floor')
+	GROUP BY T.FiscalPeriodLong
+	, T.FiscalPeriodEndDate
+	, C.FacilityLongName
+	, ISNULL(MAP.NewProgram,'Unknown')
 	;
 	GO
 
@@ -2747,15 +2734,15 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	GO
 
 	SELECT 	'22' as 'IndicatorID'
-	, X.DischargeFacilityLongName as 'Facility'
-	, X.Program as 'Program'
+	, FacilityLongName as 'Facility'
+	, Program as 'Program'
 	, FiscalPeriodEndDate as 'TimeFrame'
 	, FiscalPeriodLong as 'TimeFrameLabel'
 	, 'Fiscal Period' as 'TimeFrameType'
-	, 'ALC Days based on Discharges' as 'IndicatorName'
-	, NULL as 'Numerator'
-	, SUM(Y.Census_Days) as 'Denominator'
-	, SUM(Y.ALC_Days) as 'Value'
+	, 'ALC Days in the period' as 'IndicatorName'
+	, SUM(ALC_Days) as 'Numerator'
+	, SUM(Census_Days) as 'Denominator'
+	, SUM(ALC_Days) as 'Value'
 	, 'Below' as 'DesiredDirection'
 	, 'D0' as 'Format'
 	, CAST(NULL as float) as 'Target'
@@ -2764,25 +2751,19 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, 0 as 'Scorecard_eligible'
 	, 'True North Metrics' as 'IndicatorCategory'
 	INTO #TNR_ID22
-	FROM #TNR_discharges_22 as X
-	LEFT JOIN #TNR_ALC_discharges_22 as Y
-	ON X.AccountNumber=Y.AccountNum
-	GROUP BY X.FiscalPeriodLong
-	, X.FiscalPeriodEndDate
-	, X.Program
-	, X.DischargeFacilityLongName
+	FROM #TNR_ALC_days_22
 	--add overall
 	UNION 
 	SELECT '22' as 'IndicatorID'
-	, X.DischargeFacilityLongName as 'Facility'
+	, FacilityLongName as 'Facility'
 	, 'Overall' as 'Program'
 	, FiscalPeriodEndDate as 'TimeFrame'
 	, FiscalPeriodLong as 'TimeFrameLabel'
 	, 'Fiscal Period' as 'TimeFrameType'
-	, 'ALC Days based on Discharges' as 'IndicatorName'
-	, NULL as 'Numerator'
-	, SUM(Y.Census_Days) as 'Denominator'
-	, SUM(Y.ALC_Days) as 'Value'
+	, 'ALC Days in the period' as 'IndicatorName'
+	, SUM(ALC_Days) as 'Numerator'
+	, SUM(Census_Days) as 'Denominator'
+	, SUM(ALC_Days) as 'Value'
 	, 'Below' as 'DesiredDirection'
 	, 'D0' as 'Format'
 	, CAST(NULL as float) as 'Target'
@@ -2790,12 +2771,10 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, 1 as 'IsOverall'
 	, 0 as 'Scorecard_eligible'
 	, 'True North Metrics' as 'IndicatorCategory'
-	FROM #TNR_discharges_22 as X
-	LEFT JOIN #TNR_ALC_discharges_22 as Y
-	ON X.AccountNumber=Y.AccountNum
-	GROUP BY X.FiscalPeriodLong
-	, X.FiscalPeriodEndDate
-	, X.DischargeFacilityLongName
+	FROM #TNR_ALC_days_22
+	GROUP BY FiscalPeriodLong
+	, FiscalPeriodEndDate
+	, FacilityLongName
 	;
 	GO
 
