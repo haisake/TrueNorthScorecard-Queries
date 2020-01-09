@@ -7,6 +7,7 @@ Inclusions/Exclusions:
 Comments:
 
 DSSI.dbo.RollingFiscalYear
+
 */ 
 
 ------------------------
@@ -43,6 +44,17 @@ DSSI.dbo.RollingFiscalYear
 	INTO #TNR_FPReportTF
 	FROM #tnr_periods
 	WHERE fiscalYearLong in (	SELECT distinct TOP 3  FiscalYearLong FROM #tnr_periods ORDER BY FiscalYearLong DESC )
+	;
+	GO
+
+	-- find latest 3 rolling fiscal years
+	IF OBJECT_ID('tempdb.dbo.#TNR_RFY_ReportTF') IS NOT NULL DROP TABLE #TNR_RFY_ReportTF;
+	GO
+
+	SELECT TOP 39 *
+	INTO #TNR_RFY_ReportTF
+	FROM DSSI.dbo.RollingFiscalYear
+	WHERE [End_RFY_Date] <= DATEADD(day, -1, GETDATE())
 	;
 	GO
 
