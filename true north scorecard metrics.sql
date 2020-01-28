@@ -3463,7 +3463,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	GO
 
 -------------------------------
--- HS Hours and % change from last year ID37 and ID38
+-- Home Support (HS) Hours and % change from last year ID37 and ID38
 ------------------------------
 
 	--get HS hours out of financemart
