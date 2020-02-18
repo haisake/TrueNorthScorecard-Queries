@@ -1379,7 +1379,7 @@ DSSI.dbo.RollingFiscalYear
 	, 'D0' as 'Format'
 	, 1.0*SUM(BudgetedCensusDays)/DATEDIFF(day, fiscalperiodstartdate, fiscalperiodenddate) as 'Target'		--based on budget
 	, 'FinanceMart' as 'DataSource'	--Lamberts groupings
-	, 0 as 'IsOverall'
+	, 1 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Exceptional Care' as 'IndicatorCategory'
 	FROM #TNR_inpatientDaysPGRM
@@ -1449,7 +1449,7 @@ DSSI.dbo.RollingFiscalYear
 	, 'P1' as 'Format'
 	,  1.00 as 'Target'
 	, 'FinanceMart' as 'DataSource'	--Lamberts groupings
-	, 0 as 'IsOverall'
+	, 1 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Exceptional Care' as 'IndicatorCategory'
 	FROM #TNR_inpatientDaysPGRM
@@ -1662,7 +1662,7 @@ DSSI.dbo.RollingFiscalYear
 	, 'P2' as 'Format'		--to match finance portal
 	, IIF(SUM(OT.Bud_ProdHrs) =0, 0, 1.0 * SUM(Bud_OTHrs)/SUM(OT.Bud_ProdHrs)  ) as 'Target'
 	, 'FinanceMart' as 'DataSource'
-	, 0 as 'IsOverall'
+	, 1 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Great Place to Work' as 'IndicatorCategory'
 	FROM #tnr_otHours as OT
@@ -1881,7 +1881,7 @@ DSSI.dbo.RollingFiscalYear
 	, 'P2' as 'Format'		--to match finance portal
 	, IIF(SUM(ST.Bud_ProdHrs) =0, 0, 1.0 * SUM(ST.Bud_STHrs)/SUM(ST.Bud_ProdHrs)  ) as 'Target'
 	, 'FinanceMart' as 'DataSource'
-	, 0 as 'IsOverall'
+	, 1 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Great Place to Work' as 'IndicatorCategory'
 	FROM #tnr_sickHours as ST
@@ -2001,7 +2001,7 @@ DSSI.dbo.RollingFiscalYear
 	, 'D0' as 'Format'
 	, CAST( SUM(ND.BudNetDeficit)/1000 as int) as 'Target'
 	, 'FinanceMart' as 'DataSource'
-	, 0 as 'IsOverall'
+	, 1 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Great Place to Work' as 'IndicatorCategory'
 	FROM #TNR_revExpenses as ND
