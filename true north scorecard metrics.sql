@@ -66,9 +66,12 @@ DSSI.dbo.RollingFiscalYear
 	-- Inpatient Days
 	-------------------
 		--we mostly need an inpatient days definition for indicators 6, 12, 14, and the ALOS
-		--different sources are used for all these indicators with different criteria for different reports, which is a load of crap.
+		--different sources are used for all these indicators with different criteria for different reports....
 		--I'm syncronizing this report to a single inpatient days number for each period
-		--what mapping we use can change as we go, but here I get everything by cost center
+		--what mapping we use can change as we go, but here I get everything by cost center for all inpatient days accounts
+		--Depending on who you ask not all of '%S403%' is appropriate. There are newborn related days.
+		-- Richmonds stat acountsare S403105, S403107, S403145, S403410, & S403430 which correspond to
+		-- Inpatient Days-Acute, Inpatient Days-Sub Acute, Inpatient Days-Infant respectively, Inpatient Days - Newborn, Inpatient Days ICU Nursery respectively
 
 		--gets the inpatient days from financemart the same was as for HPPD; uses the default program mapping in financemart
 		IF OBJECT_ID('tempdb.dbo.#tnr_inpatientDaysByCC') is not null DROP TABLE #tnr_inpatientDaysByCC;
@@ -85,7 +88,7 @@ DSSI.dbo.RollingFiscalYear
 		ON ledger.[CostCenterBusinessUnitEntitySiteID]=P.[CostCenterBusinessUnitEntitySiteID]
 		INNER JOIN #TNR_FPReportTF as D					--only fiscal year/period we want to report on as defined in #hppd_fp
 		ON ledger.FiscalPeriodEndDateID=d.FiscalPeriodEndDateID	--same fiscal period and year
-		WHERE (ledger.GLAccountCode like '%S403%')	--S403 is all inpatient day accounts this includes the new born accounts. S404 is for residential care days and used in the BSc, but it doens't catch any thing.
+		WHERE (ledger.GLAccountCode like '%S403%')	--S403 is all inpatient day accounts this includes the new born accounts. S404 is for residential care days and used in the BSc, but it doens't catch any thing. The BSC inpatient days excludes 'S403410','S403430' which are IP accounts for Inpatient Days - Newborn, Inpatient Days ICU Nursery respectively
 		GROUP BY D.FiscalYearLong, D.FiscalPeriod, D.FiscalPeriodLong, D.FiscalPeriodStartDate, D.FiscalPeriodEndDate,  cc.CostCenterCode, ledger.FinSiteID, P.EntityDesc
 		GO
 
@@ -1390,7 +1393,7 @@ DSSI.dbo.RollingFiscalYear
 	, FiscalPeriodEndDate
 	;
 	GO
-	
+
 	--remove these breakdowns so they don't show up in the report; In real terms this is the Temporary Bed Unit taht was on R6N but it was paid under an unallocated cost center
 	--we can't possibly account for this in automated report as it requires to much investigation.
 	DELETE FROM #TNR_ID10 WHERE Program='RHS COO Unallocated';
@@ -4266,7 +4269,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 		INTO #skeleton 
 		FROM
 		(
-		SELECT distinct IndicatorID, IndicatorName, Facility, Program, [FORMAT], DataSource, Scorecard_eligible, [TimeFrameType]
+		SELECT distinct IndicatorID, IndicatorName, Facility, Program, [FORMAT], DataSource, Scorecard_eligible, [TimeFrameType], DesiredDirection
 		, CAST(MAX(TimeFrameYear) as int) as 'LatestYear'
 		, MAX(TimeFrameYear) -1  as 'LastYear'
 		, MAX(TimeFrameYear) -2  as 'TwoYearsAgo'
@@ -4274,7 +4277,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 		, CAST( MAX(TimeFrameYear)-2 as varchar(9) ) +'/' + CAST( MAX(TimeFrameYear)-1 as varchar(9))  as 'LastYearLabel'
 		, CAST( MAX(TimeFrameYear)-3 as varchar(9) ) +'/' + CAST( MAX(TimeFrameYear)-2 as varchar(9))  as 'TwoYearsAgoLabel'
 		FROM #TNR_FinalUnion_Mod 
-		GROUP BY IndicatorID, IndicatorName, Facility, Program, [FORMAT], DataSource, Scorecard_eligible, [TimeFrameType]
+		GROUP BY IndicatorID, IndicatorName, Facility, Program, [FORMAT], DataSource, Scorecard_eligible, [TimeFrameType], DesiredDirection
 		) as X
 		LEFT JOIN
 		(SELECT distinct IndicatorID, TimeFrameUnit FROM #TNR_FinalUnion_Mod) as Y
@@ -4294,6 +4297,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 		, CAST( P.DataSource as varchar(255)) as 'DataSource'
 		, P.Scorecard_eligible
 		, P.[TimeFrameType]
+		, P.DesiredDirection
 		, P.TimeFrameUnit
 		, P.LatestYear
 		, P.LastYear
@@ -4328,7 +4332,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 		TRUNCATE TABLE DSSI.[dbo].[TRUE_NORTH_RICHMOND_INDICATORS_YOY] ;
 		GO
 
-		INSERT INTO DSSI.[dbo].[TRUE_NORTH_RICHMOND_INDICATORS_YOY] ([IndicatorID],IndicatorName, [Facility], [Program], [FORMAT], DataSource, Scorecard_eligible, [TimeFrameType], [TimeFrameUnit], LatestYear, LastYear, TwoYearsAgo, LatestYearLabel, LastYearLabel, TwoYearsAgoLabel, [Target], [LatestYear_Value], [LastYear_Value], [TwoYearsAgo_Value] )
+		INSERT INTO DSSI.[dbo].[TRUE_NORTH_RICHMOND_INDICATORS_YOY] ([IndicatorID],IndicatorName, [Facility], [Program], [FORMAT], DataSource, Scorecard_eligible, [TimeFrameType],DesiredDirection, [TimeFrameUnit], LatestYear, LastYear, TwoYearsAgo, LatestYearLabel, LastYearLabel, TwoYearsAgoLabel, [Target], [LatestYear_Value], [LastYear_Value], [TwoYearsAgo_Value] )
 		SELECT * FROM #TNR_FinalUnion2 
 		;
 		GO
