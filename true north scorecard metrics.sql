@@ -78,6 +78,7 @@ DSSI.dbo.RollingFiscalYear
 		GO
 
 		SELECT D.FiscalYearLong, D.FiscalPeriod, D.FiscalPeriodLong, D.FiscalPeriodStartDate, D.FiscalPeriodEndDate,  cc.CostCenterCode, ledger.FinSiteID, P.EntityDesc
+		, ledger.GLAccountCode
 		, ISNULL(sum(ledger.BudgetAmt), 0.00) as 'BudgetedCensusDays'	--historical periods don't have values recorded so they are 0. Future records are not actually 0 untill some date. This is because the budget extends into the future
 		, ISNULL(sum(ledger.ActualAmt),0.00) as 'ActualCensusDays'		--historical periods don't have values recorded so they are 0 Future records are not actually 0 untill some date. This is because the budget extends into the future
 		INTO #tnr_inpatientDaysByCC
@@ -89,7 +90,7 @@ DSSI.dbo.RollingFiscalYear
 		INNER JOIN #TNR_FPReportTF as D					--only fiscal year/period we want to report on as defined in #hppd_fp
 		ON ledger.FiscalPeriodEndDateID=d.FiscalPeriodEndDateID	--same fiscal period and year
 		WHERE (ledger.GLAccountCode like '%S403%')	--S403 is all inpatient day accounts this includes the new born accounts. S404 is for residential care days and used in the BSc, but it doens't catch any thing. The BSC inpatient days excludes 'S403410','S403430' which are IP accounts for Inpatient Days - Newborn, Inpatient Days ICU Nursery respectively
-		GROUP BY D.FiscalYearLong, D.FiscalPeriod, D.FiscalPeriodLong, D.FiscalPeriodStartDate, D.FiscalPeriodEndDate,  cc.CostCenterCode, ledger.FinSiteID, P.EntityDesc
+		GROUP BY D.FiscalYearLong, D.FiscalPeriod, D.FiscalPeriodLong, D.FiscalPeriodStartDate, D.FiscalPeriodEndDate,  cc.CostCenterCode, ledger.FinSiteID, P.EntityDesc, ledger.GLAccountCode
 		GO
 
 	-------------------
@@ -1298,14 +1299,14 @@ DSSI.dbo.RollingFiscalYear
 -----------------------------------------------
 -- ID10 Number of Beds Occupied (excl. Mental Health, ED, DTU, PAR, Periops)   --- currently Average Census
 -----------------------------------------------
-	/*Comments: We switched away from Lamberts map to the people soft map for maintenance purposes.
-	The main difference on Oct 16, 2019 is in how the program RHS COO Unallocated is handled.
-	Lamberts map only had the TBU and not the surge beds cost center. We have added in the surge beds.
-	This only influences the target for most days increasing it a hundred odd inpatient days per period for this program and the overall total.
-	Actuals still match.
+	/*Comments: We are only including accounts S403105, S403107, and S403145 in this indicator similar to the BSC per March 25, 2020.
+	The BSC excludes newborn days, and for some reason inpatient NICU and SCN days.
+	The claim is that the MoH asked that we exclude NICUs and Carolina sent over some DMR internal documentation stating that they exclude it.
+	However, despite my best efforts I haven't been able to very this is a MoH source.
+	Peter notes that the MoH excludes newborns, but it was always up to our internal interpretation how we achieve this.
 
-	Lambert and Angelina Low's maps noted around April 2019 can be found in DSSI.dbo.AISAKE_TNR_CC_MAPS
-	Lamberts map is based on this file RH Prog WrkLoad YTD_2019_12.xlsx
+	This indicator includes ALC days.
+	Pop and family health includes the NICU days under S403430 for practical purposes, but the overall does not.
 	*/
 	
 	--compute and store indicators
@@ -1317,8 +1318,16 @@ DSSI.dbo.RollingFiscalYear
 	, X.FiscalPeriodLong
 	, X.EntityDesc
 	, Y.ProgramDesc
-	, SUM(BudgetedCensusDays) as 'BudgetedCensusDays'
-	, SUM(ActualCensusDays) as 'ActualCensusDays'
+	, SUM( CASE WHEN Y.ProgramDesc like '%Pop%' THEN BudgetedCensusDays
+				WHEN X.GLAccountCode in ('S403105', 'S403107', 'S403145') THEN BudgetedCEnsusDays
+				ELSE 0
+			END
+	) as 'BudgetedCensusDays'
+	, SUM( CASE WHEN Y.ProgramDesc like '%Pop%' THEN ActualCensusDays
+				WHEN X.GLAccountCode in ('S403105', 'S403107', 'S403145') THEN ActualCensusDays
+				ELSE 0
+			END
+	) as 'ActualCensusDays'
 	INTO #TNR_inpatientDaysPGRM
 	FROM #tnr_inpatientDaysByCC as X
 	INNER JOIN FinanceMart.Finance.EntityProgramSubProgram as Y
