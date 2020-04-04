@@ -1339,6 +1339,27 @@ DSSI.dbo.RollingFiscalYear
 	, X.FiscalPeriodLong
 	, X.EntityDesc
 	, Y.ProgramDesc
+	-----------------------------
+	-- for the overall which has a tweak it excludes some days in Pop&family health under GL account S403430
+	-----------------------------
+	UNION
+	SELECT X.FiscalPeriodEndDate
+	, X.FiscalPeriodStartDate
+	, X.FiscalPeriodLong
+	, X.EntityDesc
+	, 'Overall' as 'ProgramDesc'
+	, SUM( BudgetedCensusDays) as 'BudgetedCensusDays'
+	, SUM( ActualCensusDays) as 'ActualCensusDays'
+	FROM #tnr_inpatientDaysByCC as X
+	INNER JOIN FinanceMart.Finance.EntityProgramSubProgram as Y
+	ON X.FinSiteID=Y.FinSiteID
+	AND X.CostCenterCode =Y.CostCenterCode
+	AND Y.ProgramDesc is not NULL
+	WHERE X.GLAccountCode in ('S403105', 'S403107', 'S403145')	--exclude the NICU/SCN days
+	GROUP BY X.FiscalPeriodEndDate
+	, X.FiscalPeriodStartDate
+	, X.FiscalPeriodLong
+	, X.EntityDesc
 	;
 	GO
 
@@ -1362,7 +1383,7 @@ DSSI.dbo.RollingFiscalYear
 	, 'D0' as 'Format'
 	, 1.0*SUM(BudgetedCensusDays)/DATEDIFF(day, fiscalperiodstartdate, fiscalperiodenddate) as 'Target'		--based on budget
 	, 'FinanceMart' as 'DataSource'	--Lamberts groupings
-	, 0 as 'IsOverall'
+	, CASE WHEN ProgramDesc='Overall' THEN 1 ELSE 0 END as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Exceptional Care' as 'IndicatorCategory'
 	INTO #TNR_ID10
@@ -1370,33 +1391,6 @@ DSSI.dbo.RollingFiscalYear
 	WHERE Entitydesc ='Richmond Health Services'
 	GROUP BY EntityDesc
 	, ProgramDesc
-	, FiscalPeriodLong
-	, FiscalPeriodStartDate
-	, FiscalPeriodEndDate
-	--add overall
-	UNION
-	SELECT '10' as 'IndicatorID'
-	, CASE WHEN EntityDesc ='Richmond Health Services' THEN 'Richmond Hospital'
-			ELSE NULL
-	END as 'Facility'
-	, 'Overall' as 'Program'
-	, FiscalPeriodEndDate as 'TimeFrame'
-	, FiscalPeriodLong as 'TimeFrameLabel'
-	, 'Fiscal Period' as 'TimeFrameType'
-	, 'Inpatient census per day in the period' as 'IndicatorName'
-	, SUM(ActualCensusDays) as 'Numerator'
-	, DATEDIFF(day, fiscalperiodstartdate, fiscalperiodenddate) as 'Denominator'
-	, 1.0*SUM(ActualCensusDays)/DATEDIFF(day, fiscalperiodstartdate, fiscalperiodenddate)  as 'Value'
-	, 'Below' as 'DesiredDirection'
-	, 'D0' as 'Format'
-	, 1.0*SUM(BudgetedCensusDays)/DATEDIFF(day, fiscalperiodstartdate, fiscalperiodenddate) as 'Target'		--based on budget
-	, 'FinanceMart' as 'DataSource'	--Lamberts groupings
-	, 1 as 'IsOverall'
-	, 1 as 'Scorecard_eligible'
-	, 'Exceptional Care' as 'IndicatorCategory'
-	FROM #TNR_inpatientDaysPGRM
-	WHERE Entitydesc ='Richmond Health Services'
-	GROUP BY EntityDesc
 	, FiscalPeriodLong
 	, FiscalPeriodStartDate
 	, FiscalPeriodEndDate
