@@ -1418,7 +1418,7 @@ DSSI.dbo.RollingFiscalYear
 	, 1.0*SUM(ActualCensusDays)/(1+DATEDIFF(day, fiscalperiodstartdate, fiscalperiodenddate))  as 'Value'
 	, 'Below' as 'DesiredDirection'
 	, 'D0' as 'Format'
-	, 1.0*SUM(BudgetedCensusDays)/DATEDIFF(day, fiscalperiodstartdate, fiscalperiodenddate) as 'Target'		--based on budget
+	, 1.0*SUM(BudgetedCensusDays)/(1+DATEDIFF(day, fiscalperiodstartdate, fiscalperiodenddate))  as 'Target'		--based on budget
 	, 'FinanceMart' as 'DataSource'	--Lamberts groupings
 	, CASE WHEN ProgramDesc='Overall' THEN 1 ELSE 0 END as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
