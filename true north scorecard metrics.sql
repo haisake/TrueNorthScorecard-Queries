@@ -144,6 +144,26 @@ DSSI.dbo.RollingFiscalYear
 		AND [hours].costcentercode in (SELECT costcentercode FROM FinanceMart.[Dim].[CostCenter] WHERE SectorID IN (1,2)) -- 1-Acute, 2-Mental Health, 3-Other, 4-Residential, 5-TMH) --only include acute or mental health cost centers
 		) OR [hours].CostCenterCode ='89905010'		--include this cost center for some reason
 		GROUP BY [hours].FiscalYearLong, [hours].FiscalPeriod, D.FiscalPeriodLong, D.FiscalPeriodEndDate, P.EntityDesc, P.ProgramDesc
+	-- add overall
+		UNION
+		SELECT [hours].FiscalYearLong, [hours].FiscalPeriod, D.FiscalPeriodLong, D.FiscalPeriodEndDate, P.EntityDesc, 'Overall' as 'ProgramDesc'
+		--, f.FinSiteCode, f.CostCenterCode
+		--, cc.CostCenterDesc
+		, SUM(ActualHrs) as 'ProdHrs' 
+		, SUM(BudgetHrs) as 'BudgetHrs'
+		FROM FinanceMart.Finance.LDProductiveHourByJobCategory as [hours]
+		INNER JOIN #TNR_FPReportTF as D					--only fiscal year/period we want to report on
+		ON [hours].FiscalYearLong=d.FiscalYearLong	--same fiscal year
+		AND [hours].fiscalperiod =d.FiscalPeriod	--same fiscal period
+		LEFT JOIN FinanceMart.finance.EntityProgramSubProgram as P		--get the entity of the cost center fin site id
+		ON [hours].Costcenterid =P.CostCenterId and [hours].FinSiteId=P.FinSiteID
+		WHERE --IsHPPDEligible=1 and 
+		([hours].JobCategoryCode in ('RN','LPN','AIDE')	--only want these nursing hours as defined by opperations
+		AND [hours].CostCenterCode in (Select CostCenterCode from #tnr_relevantCC)		--this is some klnd of elaborate way of filtering cost centers out based on CIHI groupings
+		AND [hours].CostCenterCode NOT IN ('73402560', '72070031')				    --excluded for some additional reason
+		AND [hours].costcentercode in (SELECT costcentercode FROM FinanceMart.[Dim].[CostCenter] WHERE SectorID IN (1,2)) -- 1-Acute, 2-Mental Health, 3-Other, 4-Residential, 5-TMH) --only include acute or mental health cost centers
+		) OR [hours].CostCenterCode ='89905010'		--include this cost center for some reason
+		GROUP BY [hours].FiscalYearLong, [hours].FiscalPeriod, D.FiscalPeriodLong, D.FiscalPeriodEndDate, P.EntityDesc
 		;
 		GO
 	------------------
@@ -263,6 +283,7 @@ DSSI.dbo.RollingFiscalYear
 	, 0 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Convenient Health Care' as 'IndicatorCategory'
+	, '% ED Visits' as 'Units'
 	INTO #TNR_ID01
 	FROM #TNR_ed01
 	GROUP BY FiscalPeriodLong
@@ -290,6 +311,7 @@ DSSI.dbo.RollingFiscalYear
 	, 1 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Convenient Health Care' as 'IndicatorCategory'
+	, '% ED Visits' as 'Units'
 	FROM #TNR_ed01
 	GROUP BY FiscalPeriodLong
 	, FiscalPeriodEndDate
@@ -366,6 +388,7 @@ DSSI.dbo.RollingFiscalYear
 	, 0 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Convenient Health Care' as 'IndicatorCategory'
+	, '% ED Visits' as 'Units'
 	INTO #TNR_ID02
 	FROM #TNR_ed02
 	GROUP BY FiscalPeriodLong
@@ -391,6 +414,7 @@ DSSI.dbo.RollingFiscalYear
 	, 1 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Convenient Health Care' as 'IndicatorCategory'
+	, '% ED Visits' as 'Units'
 	FROM #TNR_ed02
 	GROUP BY FiscalPeriodLong
 	, FiscalPeriodEndDate
@@ -497,6 +521,7 @@ DSSI.dbo.RollingFiscalYear
 	, 0 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Convenient Health Care' as 'IndicatorCategory'
+	, '% ED Visits' as 'Units'
 	INTO #TNR_ID03
 	FROM #TNR_ed03
 	GROUP BY FiscalPeriodLong
@@ -522,6 +547,7 @@ DSSI.dbo.RollingFiscalYear
 	, 1 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Convenient Health Care' as 'IndicatorCategory'
+	, '% ED Visits' as 'Units'
 	FROM #TNR_ed03
 	GROUP BY FiscalPeriodLong
 	, FiscalPeriodEndDate
@@ -609,6 +635,7 @@ DSSI.dbo.RollingFiscalYear
 	END as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Convenient Health Care' as 'IndicatorCategory'
+	, 'Days' as 'Units'
 	INTO #TNR_ID04
 	FROM #TNR_financeALOS_04
 	WHERE program !='RHS COO Unallocated'
@@ -748,6 +775,7 @@ DSSI.dbo.RollingFiscalYear
 	, 0 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Convenient Health Care' as 'IndicatorCategory'
+	, '# Patients' as 'Units'
 	INTO #TNR_ID05
 	FROM #TNR_LLOS_data
 	GROUP BY FiscalPeriodLong
@@ -773,6 +801,7 @@ DSSI.dbo.RollingFiscalYear
 	, 1 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Convenient Health Care' as 'IndicatorCategory'
+	, '# Patients' as 'Units'
 	FROM #TNR_LLOS_data
 	GROUP BY FiscalPeriodLong
 	, FiscalPeriodEndDate
@@ -781,7 +810,7 @@ DSSI.dbo.RollingFiscalYear
 	GO
 
 	--append 0's ; might be something wrong here
-	INSERT INTO #TNR_ID05 (IndicatorID, Facility,IndicatorName, Program,TimeFrame, TimeFrameLabel, TimeFrameType,Numerator,Denominator,[Value],DesiredDirection,[Format],[Target],DataSource,IsOverall,Scorecard_eligible, IndicatorCategory)
+	INSERT INTO #TNR_ID05 (IndicatorID, Facility,IndicatorName, Program,TimeFrame, TimeFrameLabel, TimeFrameType,Numerator,Denominator,[Value],DesiredDirection,[Format],[Target],DataSource,IsOverall,Scorecard_eligible, IndicatorCategory, Units)
 	SELECT 	'05' as 'IndicatorID'
 	, p.facility
 	, p.IndicatorName
@@ -799,6 +828,7 @@ DSSI.dbo.RollingFiscalYear
 	, CASE WHEN P.Program ='Overall' THEN 1 ELSE 0 END as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Convenient Health Care' as 'IndicatorCategory'
+	, '# Patients' as 'Units'
 	FROM #placeholder as P
 	LEFT JOIN #TNR_ID05 as I
 	ON P.facility=I.Facility
@@ -914,6 +944,7 @@ DSSI.dbo.RollingFiscalYear
 	, 0 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Convenient Health Care' as 'IndicatorCategory'
+	, '# Inpatient Days' as 'Units'
 	INTO #TNR_ID06
 	FROM #TNR_LLOS_06
 	GROUP BY FiscalPeriodLong
@@ -940,6 +971,7 @@ DSSI.dbo.RollingFiscalYear
 	, 1 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Convenient Health Care' as 'IndicatorCategory'
+	, '# Inpatient Days' as 'Units'
 	FROM #TNR_LLOS_06
 	GROUP BY FiscalPeriodLong
 	, FiscalPeriodStartDate
@@ -949,7 +981,7 @@ DSSI.dbo.RollingFiscalYear
 	GO
 
 	--append 0's for groups where no data was present but was expected
-	INSERT INTO #TNR_ID06 (IndicatorID, Facility,IndicatorName, Program,TimeFrame, TimeFrameLabel, TimeFrameType,Numerator,Denominator,[Value],DesiredDirection,[Format],[Target],DataSource,IsOverall,Scorecard_eligible, IndicatorCategory)
+	INSERT INTO #TNR_ID06 (IndicatorID, Facility,IndicatorName, Program,TimeFrame, TimeFrameLabel, TimeFrameType,Numerator,Denominator,[Value],DesiredDirection,[Format],[Target],DataSource,IsOverall,Scorecard_eligible, IndicatorCategory, Units)
 	SELECT 	'06' as 'IndicatorID'
 	, p.facility
 	, p.IndicatorName
@@ -967,6 +999,7 @@ DSSI.dbo.RollingFiscalYear
 	, CASE WHEN P.Program ='Overall' THEN 1 ELSE 0 END as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Convenient Health Care' as 'IndicatorCategory'
+	, '# Inpatient Days' as 'Units'
 	FROM #placeholder as P
 	LEFT JOIN #TNR_ID06 as I
 	ON P.facility=I.Facility
@@ -1094,6 +1127,7 @@ DSSI.dbo.RollingFiscalYear
 	, 0 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Exceptional Care' as 'IndicatorCategory'
+	, '% Rate' as 'Units'
 	INTO #TNR_ID07
 	FROM #TNR_discharges_07 as X
 	LEFT JOIN #TNR_ALC_discharges_07 as Y
@@ -1126,6 +1160,7 @@ DSSI.dbo.RollingFiscalYear
 	, 1 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Exceptional Care' as 'IndicatorCategory'
+	, '% Rate' as 'Units'
 	FROM #TNR_discharges_07 as X
 	LEFT JOIN #TNR_ALC_discharges_07 as Y
 	ON X.AccountNumber=Y.AccountNum
@@ -1238,6 +1273,7 @@ DSSI.dbo.RollingFiscalYear
 	, 0 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Exceptional Care' as 'IndicatorCategory'
+	, '# Readmissions' as 'Units'
 	INTO #TNR_ID09
 	FROM #tnr_28dreadd2
 	--add overall
@@ -1259,6 +1295,7 @@ DSSI.dbo.RollingFiscalYear
 	, 1 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Exceptional Care' as 'IndicatorCategory'
+	, '# Readmissions' as 'Units'
 	FROM #tnr_28dreadd2
 	GROUP BY CASE WHEN facility='RHS' THEN 'Richmond Hospital' ELSE NULL END
 	, FiscalPeriodStartDate
@@ -1377,8 +1414,8 @@ DSSI.dbo.RollingFiscalYear
 	, 'Fiscal Period' as 'TimeFrameType'
 	, 'Inpatient census per day in the period' as 'IndicatorName'
 	, SUM(ActualCensusDays) as 'Numerator'
-	, DATEDIFF(day, fiscalperiodstartdate, fiscalperiodenddate) as 'Denominator'
-	, 1.0*SUM(ActualCensusDays)/DATEDIFF(day, fiscalperiodstartdate, fiscalperiodenddate)  as 'Value'
+	, (1+DATEDIFF(day, fiscalperiodstartdate, fiscalperiodenddate)) as 'Denominator'
+	, 1.0*SUM(ActualCensusDays)/(1+DATEDIFF(day, fiscalperiodstartdate, fiscalperiodenddate))  as 'Value'
 	, 'Below' as 'DesiredDirection'
 	, 'D0' as 'Format'
 	, 1.0*SUM(BudgetedCensusDays)/DATEDIFF(day, fiscalperiodstartdate, fiscalperiodenddate) as 'Target'		--based on budget
@@ -1386,6 +1423,7 @@ DSSI.dbo.RollingFiscalYear
 	, CASE WHEN ProgramDesc='Overall' THEN 1 ELSE 0 END as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Exceptional Care' as 'IndicatorCategory'
+	, 'Avg. Inpatient Days' as 'Units'
 	INTO #TNR_ID10
 	FROM #TNR_inpatientDaysPGRM
 	WHERE Entitydesc ='Richmond Health Services'
@@ -1434,35 +1472,37 @@ DSSI.dbo.RollingFiscalYear
 	, 0 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Exceptional Care' as 'IndicatorCategory'
+	, 'Avg. Inpatient Days' as 'Units'
 	INTO #TNR_ID11
 	FROM #TNR_inpatientDaysPGRM
 	WHERE EntityDesc='Richmond Health Services'		--only want the richmond IP days.
-	--add overall indicator
-	UNION
-	SELECT '11' as 'IndicatorID'
-	, CASE WHEN EntityDesc ='Richmond Health Services' THEN 'Richmond Hospital'
-			ELSE NULL
-	END as 'Facility'
-	, 'Overall' as 'Program'
-	, FiscalPeriodEndDate as 'TimeFrame'
-	, FiscalPeriodLong as 'TimeFrameLabel'
-	, 'Fiscal Period' as 'TimeFrameType'
-	, 'Beds occupied as a % of budgeted bed capacity' as 'IndicatorName'
-	, SUM(ActualCensusDays) as 'Numerator'
-	, SUM(BudgetedCensusDays) as 'Denominator'
-	, 1.0*SUM(ActualCensusDays)/ IIF(SUM(BudgetedCensusDays) =0, 1, SUM(BudgetedCensusDays) ) as 'Value'
-	, 'Below' as 'DesiredDirection'
-	, 'P1' as 'Format'
-	,  1.00 as 'Target'
-	, 'FinanceMart' as 'DataSource'	--Lamberts groupings
-	, 1 as 'IsOverall'
-	, 1 as 'Scorecard_eligible'
-	, 'Exceptional Care' as 'IndicatorCategory'
-	FROM #TNR_inpatientDaysPGRM
-	WHERE EntityDesc='Richmond Health Services'		--only want the richmond IP days.
-	GROUP BY EntityDesc, FiscalPeriodEndDate, FiscalPeriodLong
-	;
-	GO
+	----add overall indicator
+	--UNION
+	--SELECT '11' as 'IndicatorID'
+	--, CASE WHEN EntityDesc ='Richmond Health Services' THEN 'Richmond Hospital'
+	--		ELSE NULL
+	--END as 'Facility'
+	--, 'Overall' as 'Program'
+	--, FiscalPeriodEndDate as 'TimeFrame'
+	--, FiscalPeriodLong as 'TimeFrameLabel'
+	--, 'Fiscal Period' as 'TimeFrameType'
+	--, 'Beds occupied as a % of budgeted bed capacity' as 'IndicatorName'
+	--, SUM(ActualCensusDays) as 'Numerator'
+	--, SUM(BudgetedCensusDays) as 'Denominator'
+	--, 1.0*SUM(ActualCensusDays)/ IIF(SUM(BudgetedCensusDays) =0, 1, SUM(BudgetedCensusDays) ) as 'Value'
+	--, 'Below' as 'DesiredDirection'
+	--, 'P1' as 'Format'
+	--,  1.00 as 'Target'
+	--, 'FinanceMart' as 'DataSource'	--Lamberts groupings
+	--, 1 as 'IsOverall'
+	--, 1 as 'Scorecard_eligible'
+	--, 'Exceptional Care' as 'IndicatorCategory'
+	--, 'Avg. Inpatient Days' as 'Units'
+	--FROM #TNR_inpatientDaysPGRM
+	--WHERE EntityDesc='Richmond Health Services'		--only want the richmond IP days.
+	--GROUP BY EntityDesc, FiscalPeriodEndDate, FiscalPeriodLong
+	--;
+	--GO
 
 	--remove these breakdowns so they don't show up in the report; In real terms this is the Temporary Bed Unit taht was on R6N but it was paid under an unallocated cost center
 	--we can't possibly account for this in automated report as it requires to much investigation.
@@ -1644,6 +1684,7 @@ DSSI.dbo.RollingFiscalYear
 	, 0 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Great Place to Work' as 'IndicatorCategory'
+	, '% OT Rate' as 'Units'
 	INTO #TNR_ID12
 	FROM #tnr_otHours as OT
 	INNER JOIN #TNR_FPReportTF as D			--get the fiscal period descriptors
@@ -1671,6 +1712,7 @@ DSSI.dbo.RollingFiscalYear
 	, 1 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Great Place to Work' as 'IndicatorCategory'
+	, '% OT Rate' as 'Units'
 	FROM #tnr_otHours as OT
 	INNER JOIN #TNR_FPReportTF as D			--get the fiscal period descriptors
 	ON OT.FiscalYearLong=D.FiscalYearLong	--same fiscal year
@@ -1863,6 +1905,7 @@ DSSI.dbo.RollingFiscalYear
 	, 0 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Great Place to Work' as 'IndicatorCategory'
+	, '% ST Rate' as 'Units'
 	INTO #TNR_ID13
 	FROM #tnr_sickHours as ST
 	INNER JOIN #TNR_FPReportTF as D			--get the fiscal period descriptors
@@ -1890,6 +1933,7 @@ DSSI.dbo.RollingFiscalYear
 	, 1 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Great Place to Work' as 'IndicatorCategory'
+	, '% ST Rate' as 'Units'
 	FROM #tnr_sickHours as ST
 	INNER JOIN #TNR_FPReportTF as D			--get the fiscal period descriptors
 	ON ST.FiscalYearLong=D.FiscalYearLong	--same fiscal year
@@ -1988,6 +2032,7 @@ DSSI.dbo.RollingFiscalYear
 	, 0 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Great Place to Work' as 'IndicatorCategory'
+	, 'Thousands of $' as 'Units'
 	INTO #TNR_ID14
 	FROM #TNR_revExpenses as ND
 	WHERE ND.[ProgramDesc] in ('Surgery & Procedural Care','Mental Health & Addictions Ser','Emergency-CC & Medicine','Home & Community Care','Pop & Family Hlth & Primary Cr')
@@ -2010,6 +2055,7 @@ DSSI.dbo.RollingFiscalYear
 	, 1 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Great Place to Work' as 'IndicatorCategory'
+	, 'Thousands of $' as 'Units'
 	FROM #TNR_revExpenses as ND
 	-- includes all programs
 	GROUP BY FiscalPeriodEndDate
@@ -2053,6 +2099,7 @@ I replaced the whole #temp1 through #temp11 and #temp 3 logic with just one #tem
 refer to version 4 June if you want that back, but I can't see why you would.
 
 */
+
 	--get inpatient days from the section  - Finance Data from the General Ledger
 
 	--get productive hours from the section - Finance Data from the General Ledger; not sure if this is the same as the OT and ST hours
@@ -2081,6 +2128,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, 0 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Great Place to Work' as 'IndicatorCategory'
+	, 'Hours per IP Day' as 'Units'
 	INTO #TNR_ID15
 	FROM  #tnr_productiveHoursPRGM as h
 	INNER JOIN #TNR_inpatientDaysPGRM as ip
@@ -2093,43 +2141,44 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, h.FiscalPeriodEndDate
 	, h.FiscalPeriodLong
 	--add overall
-	UNION
-	SELECT '15' as 'IndicatorID'
-	, CASE WHEN h.EntityDesc ='Richmond Health Services' THEN 'Richmond Hospital'
-			ELSE NULL
-	END as 'Facility'
-	, 'Overall' as 'Program'
-	, h.FiscalPeriodEndDate as 'TimeFrame'
-	, h.FiscalPeriodLong as 'TimeFrameLabel'
-	, 'Fiscal Period' as 'TimeFrameType'
-	, 'Acute Productive Hours per Patient Day' as 'IndicatorName'
-	, SUM(h.ProdHrs) as 'Numerator'
-	, SUM(ip.ActualCensusDays) as 'Denominator'
-	, SUM(1.0*h.ProdHrs)/IIF(SUM(ip.ActualCensusDays)=0,NULL,SUM(ip.ActualCensusDays)) as 'Value'			--NULL to stop division by 0 error
-	, 'Below' as 'DesiredDirection'
-	, 'D1' as 'Format'
-	, 1.0*SUM(h.BudgetHrs)/IIF(SUM(ip.BudgetedCensusDays)=0,NULL,SUM(ip.BudgetedCensusDays)) as 'Target'	--NULL to stop division by 0 error
-	, 'FinanceMart-Custom' as 'DataSource'	--Balanced scorecard productive horus / finance inpatient days total
-	, 1 as 'IsOverall'
-	, 1 as 'Scorecard_eligible'
-	, 'Great Place to Work' as 'IndicatorCategory'
-	FROM  #tnr_productiveHoursPRGM as h
-	INNER JOIN #TNR_inpatientDaysPGRM as ip
-	ON h.FiscalPeriodLong=ip.FiscalPeriodLong
-	AND h.ProgramDesc=ip.ProgramDesc			--there si something wrong with the program overlap
-	AND h.EntityDesc=ip.EntityDesc
-	WHERE h.EntityDesc in ('Richmond Health Services')	--excludes other regions for now
-	GROUP BY h.EntityDesc
-	, h.FiscalPeriodEndDate
-	, h.FiscalPeriodLong
-	;
+	--UNION
+	--SELECT '15' as 'IndicatorID'
+	--, CASE WHEN h.EntityDesc ='Richmond Health Services' THEN 'Richmond Hospital'
+	--		ELSE NULL
+	--END as 'Facility'
+	--, 'Overall' as 'Program'
+	--, h.FiscalPeriodEndDate as 'TimeFrame'
+	--, h.FiscalPeriodLong as 'TimeFrameLabel'
+	--, 'Fiscal Period' as 'TimeFrameType'
+	--, 'Acute Productive Hours per Patient Day' as 'IndicatorName'
+	--, SUM(h.ProdHrs) as 'Numerator'
+	--, SUM(ip.ActualCensusDays) as 'Denominator'
+	--, SUM(1.0*h.ProdHrs)/IIF(SUM(ip.ActualCensusDays)=0,NULL,SUM(ip.ActualCensusDays)) as 'Value'			--NULL to stop division by 0 error
+	--, 'Below' as 'DesiredDirection'
+	--, 'D1' as 'Format'
+	--, 1.0*SUM(h.BudgetHrs)/IIF(SUM(ip.BudgetedCensusDays)=0,NULL,SUM(ip.BudgetedCensusDays)) as 'Target'	--NULL to stop division by 0 error
+	--, 'FinanceMart-Custom' as 'DataSource'	--Balanced scorecard productive horus / finance inpatient days total
+	--, 1 as 'IsOverall'
+	--, 1 as 'Scorecard_eligible'
+	--, 'Great Place to Work' as 'IndicatorCategory'
+	--, 'Hours per IP Day' as 'Units'
+	--FROM  #tnr_productiveHoursPRGM as h
+	--INNER JOIN #TNR_inpatientDaysPGRM as ip
+	--ON h.FiscalPeriodLong=ip.FiscalPeriodLong
+	--AND h.ProgramDesc=ip.ProgramDesc			--there si something wrong with the program overlap
+	--AND h.EntityDesc=ip.EntityDesc
+	--WHERE h.EntityDesc in ('Richmond Health Services')	--excludes other regions for now
+	--GROUP BY h.EntityDesc
+	--, h.FiscalPeriodEndDate
+	--, h.FiscalPeriodLong
+	--;
 
 	--identifies records that are pulled in too early. It is not realistic to have 0 revenue and expenses except for special programs.
 	DELETE FROM #TNR_ID15 WHERE Denominator=0 AND program not like '%Unallocated%';
 	GO
 
 -----------------------------------------------
--- ID16 Percent of surgical Patients Treated Within Target Wait Time
+-- ID16 Percent of surgical Cases Treated Within Target Wait Time
 -----------------------------------------------
 	/*	Purpose: to compute the percentage of surgeries completed within the target wait time. Wailist for surgery to surgery performed.
 		Author: Kaloupis Peter
@@ -2161,7 +2210,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, FiscalPeriodEndDate as 'TimeFrame'
 	, FiscalPeriodLong as 'TimeFrameLabel'
 	, 'Fiscal Period' as 'TimeFrameType'
-	, '% Surgical Patients Treated Within Target Wait Time' as 'IndicatorName'
+	, '% Surgical Cases Treated Within Target Wait Time' as 'IndicatorName'
 	, sum(cast(O.ismeetingtarget as int)) as 'Numerator'
 	, count(*) as 'Denominator'
 	, 1.0*sum(cast(O.ismeetingtarget as int))/count(*)  as 'Value'
@@ -2172,6 +2221,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, 0 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Richmond Custom' as 'IndicatorCategory'
+	, '% cases' as 'Units'
 	INTO #TNR_ID16
 	FROM ORMARt.[dbo].[vwRegionalORCompletedCase] as O
 	INNER JOIN #TNR_FPReportTF as T
@@ -2196,7 +2246,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, FiscalPeriodEndDate as 'TimeFrame'
 	, FiscalPeriodLong as 'TimeFrameLabel'
 	, 'Fiscal Period' as 'TimeFrameType'
-	, '% Surgical Patients Treated Within Target Wait Time' as 'IndicatorName'
+	, '% Surgical Cases Treated Within Target Wait Time' as 'IndicatorName'
 	, sum(cast(O.ismeetingtarget as int)) as 'Numerator'
 	, count(*) as 'Denominator'
 	, 1.0*sum(cast(O.ismeetingtarget as int))/count(*)  as 'Value'
@@ -2207,6 +2257,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, 1 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Richmond Custom' as 'IndicatorCategory'
+	, '% cases' as 'Units'
 	FROM ORMARt.[dbo].[vwRegionalORCompletedCase] as O
 	INNER JOIN #TNR_FPReportTF as T
 	ON O.SurgeryPerformedDate BETWEEN T.FiscalPeriodStartDate AND T.FiscalPeriodEndDate	--surgeries performed in thursday week. Personally, I'd be more interested in waits starting than completion perspectives.
@@ -2221,7 +2272,6 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, T.FiscalPeriodEndDate
 	;
 	GO
-
 
 -----------------------------------------------
 -- ID17 Direct Discharges From ED
@@ -2253,6 +2303,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, 1 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Richmond Custom' as 'IndicatorCategory'
+	, '# ED visits' as 'Units'
 	INTO #TNR_ID17
 	FROM EDMART.[dbo].[vwEDVisitIdentifiedRegional] as ED
 	INNER JOIN #TNR_FPReportTF as T
@@ -2266,7 +2317,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	GO
 
 	--append 0's for groups where no data was present but was expected
-	INSERT INTO #TNR_ID17 (IndicatorID, Facility,IndicatorName, Program,TimeFrame, TimeFrameLabel, TimeFrameType,Numerator,Denominator,[Value],DesiredDirection,[Format],[Target],DataSource,IsOverall, Scorecard_eligible, IndicatorCategory)
+	INSERT INTO #TNR_ID17 (IndicatorID, Facility,IndicatorName, Program,TimeFrame, TimeFrameLabel, TimeFrameType,Numerator,Denominator,[Value],DesiredDirection,[Format],[Target],DataSource,IsOverall, Scorecard_eligible, IndicatorCategory, Units)
 	SELECT 	'17' as 'IndicatorID'
 	, p.facility
 	, p.IndicatorName
@@ -2284,6 +2335,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, CASE WHEN P.Program ='Overall' THEN 1 ELSE 0 END as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Richmond Custom' as 'IndicatorCategory'
+	, '# ED visits' as 'Units'
 	FROM #placeholder as P
 	LEFT JOIN #TNR_ID17 as I
 	ON P.facility=I.Facility
@@ -2359,6 +2411,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, 0 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Richmond Custom' as 'IndicatorCategory'
+	, '# discharges' as 'Units'
 	INTO #TNR_ID18
 	FROM #TNR_SSad_18
 	GROUP BY FiscalPeriodLong
@@ -2384,13 +2437,13 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, 1 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Richmond Custom' as 'IndicatorCategory'
+	, '# discharges' as 'Units'
 	FROM #TNR_SSad_18
 	GROUP BY FiscalPeriodLong
 	, fiscalPeriodEndDate
 	, DischargeFacilityLongName
 	;
 	GO
-
 
 -----------------------------------------------
 --ID 19 ED visits
@@ -2462,6 +2515,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, 0 as 'IsOverall'
 	, 0 as 'Scorecard_eligible'
 	, 'True North Metrics' as 'IndicatorCategory'
+	, '# ED visits' as 'Units'
 	INTO #TNR_ID19
 	FROM #TNR_ed19
 	GROUP BY FiscalPeriodLong
@@ -2487,6 +2541,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, 1 as 'IsOverall'
 	, 0 as 'Scorecard_eligible'
 	, 'True North Metrics' as 'IndicatorCategory'
+	, '# ED visits' as 'Units'
 	FROM #TNR_ed19
 	GROUP BY FiscalPeriodLong
 	, FiscalPeriodEndDate
@@ -2566,6 +2621,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, 0 as 'IsOverall'
 	, 0 as 'Scorecard_eligible'
 	, 'True North Metrics' as 'IndicatorCategory'
+	, 'Admission Rate' as 'Units'
 	INTO #TNR_ID20
 	FROM #TNR_ed20
 	GROUP BY FiscalPeriodLong
@@ -2591,6 +2647,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, 1 as 'IsOverall'
 	, 0 as 'Scorecard_eligible'
 	, 'True North Metrics' as 'IndicatorCategory'
+	, 'Admission Rate' as 'Units'
 	FROM #TNR_ed20
 	GROUP BY FiscalPeriodLong
 	, FiscalPeriodEndDate
@@ -2670,6 +2727,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, 0 as 'IsOverall'
 	, 0 as 'Scorecard_eligible'
 	, 'True North Metrics' as 'IndicatorCategory'
+	, '# admissions' as 'Units'
 	INTO #TNR_ID21
 	FROM #TNR_ed21
 	GROUP BY FiscalPeriodLong
@@ -2695,6 +2753,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, 1 as 'IsOverall'
 	, 0 as 'Scorecard_eligible'
 	, 'True North Metrics' as 'IndicatorCategory'
+	, '# admissions' as 'Units'
 	FROM #TNR_ed21
 	GROUP BY FiscalPeriodLong
 	, FiscalPeriodEndDate
@@ -2768,6 +2827,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, 0 as 'IsOverall'
 	, 0 as 'Scorecard_eligible'
 	, 'True North Metrics' as 'IndicatorCategory'
+	, '# ALC Days' as 'Units'
 	INTO #TNR_ID22
 	FROM #TNR_ALC_days_22
 	--add overall
@@ -2789,6 +2849,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, 1 as 'IsOverall'
 	, 0 as 'Scorecard_eligible'
 	, 'True North Metrics' as 'IndicatorCategory'
+	, '# ALC Days' as 'Units'
 	FROM #TNR_ALC_days_22
 	GROUP BY FiscalPeriodLong
 	, FiscalPeriodEndDate
@@ -2889,6 +2950,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, 1 as 'IsOverall'
 	, 0 as 'Scorecard_eligible'
 	, 'True North Metrics' as 'IndicatorCategory'
+	, CAST(NULL as varchar(255)) as 'Units'	--needs to be filled in with a case statement
 	INTO #TNR_IDHHDASH
 	FROM DSSI.dbo.HHDASH_MasterTableAll_2 
 	WHERE indicatorId in (1,2,9,11,12,15,16,22)	--see comments
@@ -2936,6 +2998,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, 0 as 'IsOverall'
 	, 0 as 'Scorecard_eligible'
 	, 'True North Metrics' as 'IndicatorCategory'
+	, 'avg. LLOS days' as 'Units'
 	INTO #TNR_ID31
 	FROM #TNR_LLOS_data
 	GROUP BY FiscalPeriodLong
@@ -2961,6 +3024,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, 1 as 'IsOverall'
 	, 0 as 'Scorecard_eligible'
 	, 'True North Metrics' as 'IndicatorCategory'
+	, 'avg. LLOS days' as 'Units'
 	FROM #TNR_LLOS_data
 	WHERE Program not like '%Mental%'
 	GROUP BY FiscalPeriodLong
@@ -2974,7 +3038,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	--GO
 
 	--append 0's ; might be something wrong here
-	INSERT INTO #TNR_ID31 (IndicatorID, Facility,IndicatorName, Program,TimeFrame, TimeFrameLabel, TimeFrameType,Numerator,Denominator,[Value],DesiredDirection,[Format],[Target],DataSource,IsOverall,Scorecard_eligible, IndicatorCategory)
+	INSERT INTO #TNR_ID31 (IndicatorID, Facility,IndicatorName, Program,TimeFrame, TimeFrameLabel, TimeFrameType,Numerator,Denominator,[Value],DesiredDirection,[Format],[Target],DataSource,IsOverall,Scorecard_eligible, IndicatorCategory, Units)
 	SELECT 	'31' as 'IndicatorID'
 	, p.facility
 	, p.IndicatorName
@@ -2992,6 +3056,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, CASE WHEN P.Program ='Overall' THEN 1 ELSE 0 END as 'IsOverall'
 	, 0 as 'Scorecard_eligible'
 	, 'True North Metrics' as 'IndicatorCategory'
+	, 'avg. LLOS days' as 'Units'
 	FROM #placeholder as P
 	LEFT JOIN #TNR_ID31 as I
 	ON P.facility=I.Facility
@@ -3102,6 +3167,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, 0 as 'IsOverall'
 	, 0 as 'Scorecard_eligible'
 	, 'True North Metrics' as 'IndicatorCategory'
+	, 'readmissions rate' as 'Units'
 	INTO #TNR_ID32_ID33
 	FROM #tnr_readmits3
 	--add overall
@@ -3123,6 +3189,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, 0 as 'IsOverall'
 	, 0 as 'Scorecard_eligible'
 	, 'True North Metrics' as 'IndicatorCategory'
+	, 'readmissions rate' as 'Units'
 	FROM #tnr_readmits3
 	WHERE Program !='Mental Health & Addictions Ser'
 	GROUP BY IndicatorId
@@ -3230,6 +3297,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, 0 as 'IsOverall'
 	, 0 as 'Scorecard_eligible'
 	, 'True North Metrics' as 'IndicatorCategory' 
+	, '# beds' as 'Units'
 	INTO #TNR_MHSU_Census
 	FROM ADTCMart.adtc.vwCensusFact as ADTC
 	LEFT JOIN DSSI.dbo.RH_VisibilityWall_NU_PROGRAM_MAP_ADTC as MAP
@@ -3264,13 +3332,13 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	IF OBJECT_ID('tempdb.dbo.#TNR_ID34') IS NOT NULL DROP TABLE #TNR_ID34;
 	GO
 
-	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, TimeFrameType, IndicatorName, Numerator, Denominator, [Value], DesiredDirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, TimeFrameType, IndicatorName, Numerator, Denominator, [Value], DesiredDirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units
 	INTO #TNR_ID34
 	FROM #TNR_MHSU_Census
 	UNION
-	SELECT IndicatorID, Facility, 'Overall' as 'Program', TimeFrame, TimeFrameLabel, TimeFrameType, IndicatorName, SUM(Numerator), SUM(Denominator), 1.0*SUM(Numerator)/SUM(Denominator), DesiredDirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	SELECT IndicatorID, Facility, 'Overall' as 'Program', TimeFrame, TimeFrameLabel, TimeFrameType, IndicatorName, SUM(Numerator), SUM(Denominator), 1.0*SUM(Numerator)/SUM(Denominator), DesiredDirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units
 	FROM #TNR_MHSU_Census
-	GROUP BY IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, TimeFrameType, IndicatorName, DesiredDirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	GROUP BY IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, TimeFrameType, IndicatorName, DesiredDirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, units
 	;
 	GO
 
@@ -3518,6 +3586,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, 0 as 'IsOverall'
 	, 0 as 'Scorecard_eligible'
 	, 'True North Metrics' as 'IndicatorCategory'
+	, '# hours' as 'Units'
 	INTO #TNR_ID37
 	FROM #tnr_hsHours as X
 	INNER JOIN #TNR_FPReportTF as Y
@@ -3541,6 +3610,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, 1 as 'IsOverall'
 	, 0 as 'Scorecard_eligible'
 	, 'True North Metrics' as 'IndicatorCategory'
+	, '# hours' as 'Units'
 	FROM #tnr_hsHours as X
 	INNER JOIN #TNR_FPReportTF as Y
 	ON X.FiscalPeriodLong = Y.FiscalPeriodLong
@@ -3582,6 +3652,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, 0 as 'IsOverall'
 	, 0 as 'Scorecard_eligible'
 	, 'True North Metrics' as 'IndicatorCategory'
+	, '% change' as 'Units'
 	INTO #TNR_ID38
 	FROM #tnr_hsHoursChanged as X
 	INNER JOIN #TNR_FPReportTF as Y
@@ -3605,6 +3676,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, 1 as 'IsOverall'
 	, 0 as 'Scorecard_eligible'
 	, 'True North Metrics' as 'IndicatorCategory'
+	, '% change' as 'Units'
 	FROM #tnr_hsHoursChanged as X
 	INNER JOIN #TNR_FPReportTF as Y
 	ON X.FiscalPeriodLong = Y.FiscalPeriodLong
@@ -3888,6 +3960,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, 1 as 'IsOverall'
 	, 0 as 'Scorecard_eligible'
 	, 'Richmond Custom' as 'IndicatorCategory'
+	, '# cases per 10,000 pt. days' as 'Units'
 	INTO #TNR_ID39
 	FROM #tmpID39 as X
 	INNER JOIN #TNR_FPReportTF as D			--filter out too old data
@@ -3971,6 +4044,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 		, 0 as 'IsOverall'
 		, 1 as 'Scorecard_eligible'
 		, 'Exceptional Care' as 'IndicatorCategory'
+		, 'ALC rate' as 'Units'
 		INTO #TNR_ID40
 		FROM #TNR_raw40
 		GROUP BY Facility
@@ -3996,6 +4070,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 		, 1 as 'IsOverall'
 		, 1 as 'Scorecard_eligible'
 		, 'Exceptional Care' as 'IndicatorCategory'
+		, 'ALC rate' as 'Units'
 		FROM #TNR_raw40
 		GROUP BY Facility
 		, FiscalPeriodEndDate
@@ -4059,6 +4134,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, 1 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Exceptional Care' as 'IndicatorCategory'
+	, 'discharge variance' as 'Units'
 	INTO #TNR_FAKE
 	FROM #TNR_ID01
 	;
@@ -4073,108 +4149,108 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	GO
 	
 	--put the new data into the table
-	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units
 	INTO #TNR_FinalUnion
 	FROM #TNR_ID01
 	UNION
-	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units
 	FROM #TNR_ID01
 	UNION
-	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units
 	FROM #TNR_ID02
 	UNION
-	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units
 	FROM #TNR_ID03
 	UNION
-	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units
 	FROM #TNR_ID04
 	UNION
-	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units
 	FROM #TNR_ID05
 	UNION
-	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units
 	FROM #TNR_ID06
 	UNION
-	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units
 	FROM #TNR_ID07
 	--UNION
-	--SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	--SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units
 	--FROM #TNR_ID08
 	UNION
-	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units
 	FROM #TNR_ID09
 	UNION
-	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units
 	FROM #TNR_ID10
 	UNION
-	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units
 	FROM #TNR_ID11
 	UNION
-	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units
 	FROM #TNR_ID12
 	UNION
-	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units
 	FROM #TNR_ID13
 	UNION
-	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units
 	FROM #TNR_ID14
 	UNION
-	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units
 	FROM #TNR_ID15
 	UNION
-	SELECT IndicatorID, Facility, LoggedMainsurgeonSpecialty, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	SELECT IndicatorID, Facility, LoggedMainsurgeonSpecialty, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units
 	FROM #TNR_ID16
 	UNION
-	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units
 	FROM #TNR_ID17
 	UNION
-	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units
 	FROM #TNR_ID18
 	UNION
-	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units
 	FROM #TNR_ID19
 	UNION
-	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units
 	FROM #TNR_ID20
 	UNION
-	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units
 	FROM #TNR_ID21
 	UNION
-	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units
 	FROM #TNR_ID22
 	UNION
-	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units
 	FROM #TNR_IDHHDASH
 	UNION
-	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units
 	FROM #TNR_ID31
 	UNION
-	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units
 	FROM #TNR_ID32_ID33
 	UNION
-	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units
 	FROM #TNR_ID34
 	--UNION
-	--SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	--SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units
 	--FROM #TNR_ID35
 	--UNION
-	--SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	--SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units
 	--FROM #TNR_ID36
 	UNION
-	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units
 	FROM #TNR_ID37
 	UNION
-	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units
 	FROM #TNR_ID38
 	UNION
-	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units
 	FROM #TNR_ID39
 	UNION
-	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units
 	FROM #TNR_ID40
 	--add fake rows to populate summary page
 	UNION
-	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory
+	SELECT IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units
 	FROM #TNR_FAKE
 	;
 	GO
@@ -4185,7 +4261,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 		TRUNCATE TABLE DSSI.dbo.TRUE_NORTH_RICHMOND_INDICATORS;
 		GO
 
-		INSERT INTO DSSI.dbo.TRUE_NORTH_RICHMOND_INDICATORS (IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory)
+		INSERT INTO DSSI.dbo.TRUE_NORTH_RICHMOND_INDICATORS (IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units)
 		SELECT * FROM #TNR_FinalUnion
 		;
 		GO
@@ -4279,8 +4355,9 @@ refer to version 4 June if you want that back, but I can't see why you would.
 		, CAST( MAX(TimeFrameYear)-1 as varchar(9) ) +'/' + CAST( MAX(TimeFrameYear) as varchar(9))  as 'LatestYearLabel'
 		, CAST( MAX(TimeFrameYear)-2 as varchar(9) ) +'/' + CAST( MAX(TimeFrameYear)-1 as varchar(9))  as 'LastYearLabel'
 		, CAST( MAX(TimeFrameYear)-3 as varchar(9) ) +'/' + CAST( MAX(TimeFrameYear)-2 as varchar(9))  as 'TwoYearsAgoLabel'
+		, units
 		FROM #TNR_FinalUnion_Mod 
-		GROUP BY IndicatorID, IndicatorName, Facility, Program, [FORMAT], DataSource, Scorecard_eligible, [TimeFrameType], DesiredDirection
+		GROUP BY IndicatorID, IndicatorName, Facility, Program, [FORMAT], DataSource, Scorecard_eligible, [TimeFrameType], DesiredDirection, units
 		) as X
 		LEFT JOIN
 		(SELECT distinct IndicatorID, TimeFrameUnit FROM #TNR_FinalUnion_Mod) as Y
@@ -4309,6 +4386,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 		, P.LastYearLabel
 		, P.TwoYearsAgoLabel
 		, X.[Target], X.[Value] as 'LatestYear_Value',  Y.[Value] as 'LastYear_Value', Z.[Value] as 'TwoYearsAgo_Value'
+		, P.units
 		INTO #TNR_FinalUnion2
 		FROM #skeleton as P
 		LEFT JOIN #TNR_FinalUnion_Mod as X	--get latest year value
@@ -4335,7 +4413,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 		TRUNCATE TABLE DSSI.[dbo].[TRUE_NORTH_RICHMOND_INDICATORS_YOY] ;
 		GO
 
-		INSERT INTO DSSI.[dbo].[TRUE_NORTH_RICHMOND_INDICATORS_YOY] ([IndicatorID],IndicatorName, [Facility], [Program], [FORMAT], DataSource, Scorecard_eligible, [TimeFrameType],DesiredDirection, [TimeFrameUnit], LatestYear, LastYear, TwoYearsAgo, LatestYearLabel, LastYearLabel, TwoYearsAgoLabel, [Target], [LatestYear_Value], [LastYear_Value], [TwoYearsAgo_Value] )
+		INSERT INTO DSSI.[dbo].[TRUE_NORTH_RICHMOND_INDICATORS_YOY] ([IndicatorID],IndicatorName, [Facility], [Program], [FORMAT], DataSource, Scorecard_eligible, [TimeFrameType],DesiredDirection, [TimeFrameUnit], LatestYear, LastYear, TwoYearsAgo, LatestYearLabel, LastYearLabel, TwoYearsAgoLabel, [Target], [LatestYear_Value], [LastYear_Value], [TwoYearsAgo_Value], units )
 		SELECT * FROM #TNR_FinalUnion2 
 		;
 		GO
