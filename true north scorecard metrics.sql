@@ -587,7 +587,6 @@ DSSI.dbo.RollingFiscalYear
 -----------------------------------------------
 -- ID04 ALOS 
 -----------------------------------------------
-	
 	--pulls in relevant fields from a finance mart tabel that is supposed to be a copy of a finance ALOS report
 	IF OBJECT_ID('tempdb.dbo.#TNR_financeALOS_04') IS NOT NULL DROP TABLE #TNR_financeALOS_04;
 	GO
@@ -638,7 +637,7 @@ DSSI.dbo.RollingFiscalYear
 	, 'Days' as 'Units'
 	INTO #TNR_ID04
 	FROM #TNR_financeALOS_04
-	WHERE program !='RHS COO Unallocated'
+	WHERE program not in ('RHS COO Unallocated','Long Term Care Services','Medicine Services','Mental Hlth & Substance Use')
 	--overall is included in the source data and doesn't need to be added here like the other indicators
 	;
 	GO
@@ -1426,7 +1425,10 @@ DSSI.dbo.RollingFiscalYear
 	, 'Avg. Inpatient Days' as 'Units'
 	INTO #TNR_ID10
 	FROM #TNR_inpatientDaysPGRM
-	WHERE Entitydesc ='Richmond Health Services'
+	WHERE (
+	Entitydesc ='Richmond Health Services' 
+	AND ProgramDesc not in ('Long Term Care Services','Medicine Services','Mental Hlth & Substance Use')
+	)	--we don't want to keep these indicators for RHS
 	GROUP BY EntityDesc
 	, ProgramDesc
 	, FiscalPeriodLong
@@ -1476,37 +1478,12 @@ DSSI.dbo.RollingFiscalYear
 	INTO #TNR_ID11
 	FROM #TNR_inpatientDaysPGRM
 	WHERE EntityDesc='Richmond Health Services'		--only want the richmond IP days.
-	----add overall indicator
-	--UNION
-	--SELECT '11' as 'IndicatorID'
-	--, CASE WHEN EntityDesc ='Richmond Health Services' THEN 'Richmond Hospital'
-	--		ELSE NULL
-	--END as 'Facility'
-	--, 'Overall' as 'Program'
-	--, FiscalPeriodEndDate as 'TimeFrame'
-	--, FiscalPeriodLong as 'TimeFrameLabel'
-	--, 'Fiscal Period' as 'TimeFrameType'
-	--, 'Beds occupied as a % of budgeted bed capacity' as 'IndicatorName'
-	--, SUM(ActualCensusDays) as 'Numerator'
-	--, SUM(BudgetedCensusDays) as 'Denominator'
-	--, 1.0*SUM(ActualCensusDays)/ IIF(SUM(BudgetedCensusDays) =0, 1, SUM(BudgetedCensusDays) ) as 'Value'
-	--, 'Below' as 'DesiredDirection'
-	--, 'P1' as 'Format'
-	--,  1.00 as 'Target'
-	--, 'FinanceMart' as 'DataSource'	--Lamberts groupings
-	--, 1 as 'IsOverall'
-	--, 1 as 'Scorecard_eligible'
-	--, 'Exceptional Care' as 'IndicatorCategory'
-	--, 'Avg. Inpatient Days' as 'Units'
-	--FROM #TNR_inpatientDaysPGRM
-	--WHERE EntityDesc='Richmond Health Services'		--only want the richmond IP days.
-	--GROUP BY EntityDesc, FiscalPeriodEndDate, FiscalPeriodLong
-	--;
-	--GO
+	;
+	GO
 
 	--remove these breakdowns so they don't show up in the report; In real terms this is the Temporary Bed Unit taht was on R6N but it was paid under an unallocated cost center
 	--we can't possibly account for this in automated report as it requires to much investigation.
-	DELETE FROM #TNR_ID11 WHERE Program='RHS COO Unallocated';
+	DELETE FROM #TNR_ID11 WHERE Program in ('RHS COO Unallocated','Long Term Care Services','Medicine Services','Mental Hlth & Substance Use') AND Facility='Richmond Hospital';
 	GO
 
 	--only unallocated can have 0 beds occupied legitimately
@@ -2067,17 +2044,7 @@ DSSI.dbo.RollingFiscalYear
 	--identifies records that are pulled in too early. It is not realistic to have 0 revenue and expenses except for special programs.
 	DELETE FROM #TNR_ID14 WHERE Numerator =0 AND Denominator=0 AND program not like '%Unallocated%';
 	GO
-	
-	--to get YTD for 2019
-	--SELECT Program
-	--, '2019-YTD'
-	--, SUM(Numerator) as 'Revenue'
-	--, SUM(Denominator) as 'Expenses'
-	--, SUM([Value])  as 'NetDeficit'
-	--FROM #TNR_ID14
-	--WHERE LEFT(TimeFrameLabel,4) = '2019'	--need to make sure we have 13 periods in the above adjust #tnrreporting_fp if they aren't
-	--GROUP BY Program
-	
+		
 -----------------------------------------------
 -- ID15 Acute Productive Hours Per Patient Day
 -----------------------------------------------
@@ -2135,43 +2102,16 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	ON h.FiscalPeriodLong=ip.FiscalPeriodLong
 	AND h.ProgramDesc=ip.ProgramDesc
 	AND h.EntityDesc=ip.EntityDesc
-	WHERE h.EntityDesc in ('Richmond Health Services')	--excludes other regions for now but they are un the underlying tables
+	WHERE (
+	h.Entitydesc ='Richmond Health Services' 
+	AND h.ProgramDesc not in ('Long Term Care Services','Medicine Services','Mental Hlth & Substance Use')
+	)	--we don't want to keep these indicators for RHS
 	GROUP BY h.EntityDesc
 	, h.ProgramDesc
 	, h.FiscalPeriodEndDate
 	, h.FiscalPeriodLong
-	--add overall
-	--UNION
-	--SELECT '15' as 'IndicatorID'
-	--, CASE WHEN h.EntityDesc ='Richmond Health Services' THEN 'Richmond Hospital'
-	--		ELSE NULL
-	--END as 'Facility'
-	--, 'Overall' as 'Program'
-	--, h.FiscalPeriodEndDate as 'TimeFrame'
-	--, h.FiscalPeriodLong as 'TimeFrameLabel'
-	--, 'Fiscal Period' as 'TimeFrameType'
-	--, 'Acute Productive Hours per Patient Day' as 'IndicatorName'
-	--, SUM(h.ProdHrs) as 'Numerator'
-	--, SUM(ip.ActualCensusDays) as 'Denominator'
-	--, SUM(1.0*h.ProdHrs)/IIF(SUM(ip.ActualCensusDays)=0,NULL,SUM(ip.ActualCensusDays)) as 'Value'			--NULL to stop division by 0 error
-	--, 'Below' as 'DesiredDirection'
-	--, 'D1' as 'Format'
-	--, 1.0*SUM(h.BudgetHrs)/IIF(SUM(ip.BudgetedCensusDays)=0,NULL,SUM(ip.BudgetedCensusDays)) as 'Target'	--NULL to stop division by 0 error
-	--, 'FinanceMart-Custom' as 'DataSource'	--Balanced scorecard productive horus / finance inpatient days total
-	--, 1 as 'IsOverall'
-	--, 1 as 'Scorecard_eligible'
-	--, 'Great Place to Work' as 'IndicatorCategory'
-	--, 'Hours per IP Day' as 'Units'
-	--FROM  #tnr_productiveHoursPRGM as h
-	--INNER JOIN #TNR_inpatientDaysPGRM as ip
-	--ON h.FiscalPeriodLong=ip.FiscalPeriodLong
-	--AND h.ProgramDesc=ip.ProgramDesc			--there si something wrong with the program overlap
-	--AND h.EntityDesc=ip.EntityDesc
-	--WHERE h.EntityDesc in ('Richmond Health Services')	--excludes other regions for now
-	--GROUP BY h.EntityDesc
-	--, h.FiscalPeriodEndDate
-	--, h.FiscalPeriodLong
-	--;
+	;
+	GO
 
 	--identifies records that are pulled in too early. It is not realistic to have 0 revenue and expenses except for special programs.
 	DELETE FROM #TNR_ID15 WHERE Denominator=0 AND program not like '%Unallocated%';
@@ -3068,7 +3008,6 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	;
 	GO
 
-
 -----------------------------------------------
 -- ID32 ID33  7 day and 28 day readmission rates excluding MH from overall
 -----------------------------------------------
@@ -3366,6 +3305,8 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	Date Created: 2019 September 3
 	Date Modified: 
 	Comments: Program is Home and Community Care
+	-- The LTC team is not running the code to populate this table.
+	I'll need to sneak it into Flora's query.
 	*/
 
 	IF OBJECT_ID('tempdb.dbo.#TNR_ID36_Excel') is not NULL DROP TABLE #TNR_ID36_Excel;
@@ -4468,4 +4409,3 @@ refer to version 4 June if you want that back, but I can't see why you would.
 ------------
 -- END QUERY
 ------------
-
