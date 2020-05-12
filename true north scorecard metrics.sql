@@ -6,6 +6,8 @@ Date Modified: August 21, 2019
 Inclusions/Exclusions:
 Comments:
 
+Why do we remove Mental Health from the ALOS indicator?
+
 DSSI.dbo.RollingFiscalYear
 
 */ 
@@ -319,6 +321,12 @@ DSSI.dbo.RollingFiscalYear
 	;
 	GO
 
+	--remove these programs 
+	DELETE FROM #TNR_ID01 
+	WHERE Program in ('Long Term Care Services')
+	;
+	GO
+
 -----------------------------------------------
 --ID02 Percent of ED patients admitted to hospital between 10-11 hours (near misses) - P4P
 -----------------------------------------------
@@ -451,6 +459,13 @@ DSSI.dbo.RollingFiscalYear
 	AND X.TimeFrameLAbel=Y.TimeFrameLabel
 	WHERE Y.[Target] is not null
 	;
+	GO
+
+	--remove Minoru indicators
+	DELETE FROM #TNR_ID02
+	WHERE Program in ('Long Term Care Services')
+	;
+	GO
 
 -----------------------------------------------
 --ID03 Percent of ED patients admitted to hospital longer than 18 hours (long delays)- P4P
@@ -573,6 +588,8 @@ DSSI.dbo.RollingFiscalYear
 	GROUP BY X.TimeFrameLabel
 	, X.Facility
 	, X.Program
+	;
+	GO
 
 	--add targets to the table
 	UPDATE X
@@ -583,6 +600,13 @@ DSSI.dbo.RollingFiscalYear
 	AND X.TimeFrameLAbel=Y.TimeFrameLabel
 	WHERE Y.[Target] is not null
 	;
+	GO
+
+	--remove Minoru indicators
+	DELETE FROM #TNR_ID03
+	WHERE Program in ('Long Term Care Services')
+	;
+	GO
 
 -----------------------------------------------
 -- ID04 ALOS 
@@ -637,7 +661,7 @@ DSSI.dbo.RollingFiscalYear
 	, 'Days' as 'Units'
 	INTO #TNR_ID04
 	FROM #TNR_financeALOS_04
-	WHERE program not in ('RHS COO Unallocated','Long Term Care Services','Medicine Services','Mental Hlth & Substance Use')
+	WHERE program not in ('RHS COO Unallocated','Long Term Care Services')
 	--overall is included in the source data and doesn't need to be added here like the other indicators
 	;
 	GO
@@ -649,13 +673,13 @@ DSSI.dbo.RollingFiscalYear
 	SELECT  F.FiscalYear
 	, D.FiscalPeriodEndDate		--get the fiscal period date from another table
 	, CASE	WHEN sector='' AND program='' AND subprogram ='' AND costcenter ='' THEN 'Overall'	--rename the overall label to be consistent with other indicators
-			WHEN Program = 'Critical Care-Med-Pat Flow' THEN   'Emergency-CC & Medicine'		--fix the old names to the new names
+			WHEN Program in ('Critical Care-Med-Pat Flow','Emergency-CC & Medicine') THEN 'Emerg & Critical Care'	--fix the old names to the new names
 			WHEN Program = 'Home & Community Care' THEN 'Home & Community Care'
 			WHEN Program = 'Med Adm-Surg-Ambl' THEN 'Surgery & Procedural Care'
-			WHEN Program = 'Mental Health & Addictions Ser' THEN  'Mental Health & Addictions Ser'
+			WHEN Program = 'Mental Health & Addictions Ser' THEN  'Mental Hlth & Substance Use'
 			WHEN Program = 'Overall' THEN 'Overall'
 			WHEN Program = 'Population & Family Health' THEN 'Pop & Family Hlth & Primary Cr'
-			WHEN Program = 'Residential Care Services' THEN 'Residential Care Services'
+			WHEN Program = 'Residential Care Services' THEN 'Long Term Care Services'
 			ELSE Program
 	END as 'Program'
 	, 'Richmond Hospital' as 'Facility'
@@ -859,6 +883,8 @@ DSSI.dbo.RollingFiscalYear
 	GROUP BY X.TimeFrameLabel
 	, X.Facility
 	, X.Program
+	;
+	GO
 
 	--add targets to the table
 	UPDATE X
@@ -869,7 +895,8 @@ DSSI.dbo.RollingFiscalYear
 	AND X.TimeFrameLAbel=Y.TimeFrameLabel
 	WHERE Y.[Target] is not null
 	;
-		
+	GO
+
 -----------------------------------------------
 -- ID06 Discharged Long Length of Stay (> 30 days) patient days excludes newborns
 -----------------------------------------------
@@ -1039,6 +1066,7 @@ DSSI.dbo.RollingFiscalYear
 	AND X.TimeFrameLAbel=Y.TimeFrameLabel
 	WHERE Y.[Target] is not null
 	;
+	GO
 
 -----------------------------------------------
 -- ID07 ALC rate Discharge Based Excluding NewBorns
@@ -1427,7 +1455,7 @@ DSSI.dbo.RollingFiscalYear
 	FROM #TNR_inpatientDaysPGRM
 	WHERE (
 	Entitydesc ='Richmond Health Services' 
-	AND ProgramDesc not in ('Long Term Care Services','Medicine Services','Mental Hlth & Substance Use')
+	AND ProgramDesc not in ('Long Term Care Services')
 	)	--we don't want to keep these indicators for RHS
 	GROUP BY EntityDesc
 	, ProgramDesc
@@ -1435,11 +1463,6 @@ DSSI.dbo.RollingFiscalYear
 	, FiscalPeriodStartDate
 	, FiscalPeriodEndDate
 	;
-	GO
-
-	--remove these breakdowns so they don't show up in the report; In real terms this is the Temporary Bed Unit taht was on R6N but it was paid under an unallocated cost center
-	--we can't possibly account for this in automated report as it requires to much investigation.
-	DELETE FROM #TNR_ID10 WHERE Program='RHS COO Unallocated';
 	GO
 
 	--only unallocated can have 0 days legitimately
@@ -1479,11 +1502,6 @@ DSSI.dbo.RollingFiscalYear
 	FROM #TNR_inpatientDaysPGRM
 	WHERE EntityDesc='Richmond Health Services'		--only want the richmond IP days.
 	;
-	GO
-
-	--remove these breakdowns so they don't show up in the report; In real terms this is the Temporary Bed Unit taht was on R6N but it was paid under an unallocated cost center
-	--we can't possibly account for this in automated report as it requires to much investigation.
-	DELETE FROM #TNR_ID11 WHERE Program in ('RHS COO Unallocated','Long Term Care Services','Medicine Services','Mental Hlth & Substance Use') AND Facility='Richmond Hospital';
 	GO
 
 	--only unallocated can have 0 beds occupied legitimately
@@ -1667,7 +1685,6 @@ DSSI.dbo.RollingFiscalYear
 	INNER JOIN #TNR_FPReportTF as D			--get the fiscal period descriptors
 	ON OT.FiscalYearLong=D.FiscalYearLong	--same fiscal year
 	AND OT.FiscalPeriod=D.FiscalPeriod		--same fiscal period
-	WHERE programdesc in ('Pop & Family Hlth & Primary Cr','Mental Health & Addictions Ser','Home & Community Care','Surgery & Procedural Care','Emergency-CC & Medicine') --only want these program breakdowns
 	--add overall
 	UNION
 	SELECT '12' as 'IndicatorID'
@@ -1694,7 +1711,7 @@ DSSI.dbo.RollingFiscalYear
 	INNER JOIN #TNR_FPReportTF as D			--get the fiscal period descriptors
 	ON OT.FiscalYearLong=D.FiscalYearLong	--same fiscal year
 	AND OT.FiscalPeriod=D.FiscalPeriod		--same fiscal period
-	WHERE OT.ProgramDesc not in ('Health Protection','BISS','Regional Clinical Services')	--remove from to match Riley's included programs. These are regional not richmond specific.
+	WHERE OT.ProgramDesc not in ('Health Protection','BISS','Regional Clinical Services','Volunteers','Comm Geriatrics & Spiritual Cr')	--remove from to match Riley's included programs. These are regional not richmond specific.
 	GROUP BY EntityDesc
 	, D.FiscalPeriodEndDate
 	, D.FiscalPeriodLong
@@ -1888,7 +1905,6 @@ DSSI.dbo.RollingFiscalYear
 	INNER JOIN #TNR_FPReportTF as D			--get the fiscal period descriptors
 	ON ST.FiscalYearLong=D.FiscalYearLong	--same fiscal year
 	AND ST.FiscalPeriod=D.FiscalPeriod		--same fiscal period
-	WHERE programdesc in ('Pop & Family Hlth & Primary Cr','Mental Health & Addictions Ser','Home & Community Care','Surgery & Procedural Care','Emergency-CC & Medicine') --only want these program breakdowns
 	--add overall
 	UNION
 	SELECT '13' as 'IndicatorID'
@@ -1915,7 +1931,7 @@ DSSI.dbo.RollingFiscalYear
 	INNER JOIN #TNR_FPReportTF as D			--get the fiscal period descriptors
 	ON ST.FiscalYearLong=D.FiscalYearLong	--same fiscal year
 	AND ST.FiscalPeriod=D.FiscalPeriod		--same fiscal period
-	WHERE ST.ProgramDesc not in ('Health Protection','BISS','Regional Clinical Services')	--remove from to match Riley's included programs. These are regional not richmond specific.
+	WHERE ST.ProgramDesc not in ('Health Protection','BISS','Regional Clinical Services','Volunteers','Comm Geriatrics & Spiritual Cr')	--remove from to match Riley's included programs. These are regional not richmond specific.
 	GROUP BY EntityDesc
 	, D.FiscalPeriodEndDate
 	, D.FiscalPeriodLong
@@ -2012,7 +2028,6 @@ DSSI.dbo.RollingFiscalYear
 	, 'Thousands of $' as 'Units'
 	INTO #TNR_ID14
 	FROM #TNR_revExpenses as ND
-	WHERE ND.[ProgramDesc] in ('Surgery & Procedural Care','Mental Health & Addictions Ser','Emergency-CC & Medicine','Home & Community Care','Pop & Family Hlth & Primary Cr')
 	--add overall
 	UNION
 	SELECT '14' as 'IndicatorID'
@@ -2040,7 +2055,6 @@ DSSI.dbo.RollingFiscalYear
 	;
 	GO
 
-	
 	--identifies records that are pulled in too early. It is not realistic to have 0 revenue and expenses except for special programs.
 	DELETE FROM #TNR_ID14 WHERE Numerator =0 AND Denominator=0 AND program not like '%Unallocated%';
 	GO
@@ -2104,7 +2118,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	AND h.EntityDesc=ip.EntityDesc
 	WHERE (
 	h.Entitydesc ='Richmond Health Services' 
-	AND h.ProgramDesc not in ('Long Term Care Services','Medicine Services','Mental Hlth & Substance Use')
+	AND h.ProgramDesc not in ('Long Term Care Services')
 	)	--we don't want to keep these indicators for RHS
 	GROUP BY h.EntityDesc
 	, h.ProgramDesc
@@ -2173,7 +2187,6 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	and ORRoomCode in ('RH BC','RH PRIVGOV','RHOR1','RHOR2','RHOR3','RHOR4','RHOR5','RHOR6','RHOR7','RHOR8','RHPRIV')	--only include these OR room codes for Richmond
 	AND C.Codes is NULL	--exclude these procedures
 	AND O.LoggedMainSurgeonSpecialty is not null
-	AND O.LoggedMainSurgeonSpecialty not in ('Cardiology','Psychiatry')
 	group by O.facilityLongName
 	, T.FiscalPeriodLong
 	, T.FiscalPeriodEndDate
@@ -4208,49 +4221,31 @@ refer to version 4 June if you want that back, but I can't see why you would.
 		GO
 
 	------------------------------
-	-- for time series vesion SSRS
+	-- for the scorecard front page
 	------------------------------
 
-		--most recent values
-		--WITH mostRecent as (
-		--	SELECT IndicatorName
-		--	, Program
-		--	, MAX(timeframe) as 'LatestTimeFrame'
-		--	FROM DSSI.dbo.TRUE_NORTH_RICHMOND_INDICATORS
-		--	WHERE indicatorID not in (16,40)
-		--	OR (indicatorID=16 AND program='Overall')	--don't pull surgical programs
-		--	OR (indicatorID=40 AND program='Overall')	--don't pull ALC Medical SErvice programs
-		--	GROUP BY IndicatorName
-		--	, Program
-		--)
+	--WITH mostRecent as (
+	--SELECT distinct IndicatorName
+	--, Program
+	--, MAX(timeframe) as 'LatestTimeFrame'
+	--FROM DSSI.dbo.TRUE_NORTH_RICHMOND_INDICATORS
+	--WHERE (indicatorID not in (16,40) and program in ('Emerg & Critical Care','Home & Community Care','Medicine Services','Mental Hlth & Substance Use','Overall','Surgery & Procedural Care','Pop & Family Hlth & Primary Cr') )
+	--OR (indicatorID=16 AND program='Overall')	--don't pull surgical programs
+	--GROUP BY IndicatorName
+	--, Program
+	--)
 
-		--SELECT X.*
-		--FROM DSSI.dbo.TRUE_NORTH_RICHMOND_INDICATORS as X
-		--INNER JOIN mostRecent  as Y
-		--ON  X.TimeFrame=Y.LatestTimeFrame
-		--AND X.Program=Y.Program
-		--AND X.IndicatorName=Y.IndicatorName
-		--OR  X.indicatorID in ('08')
-		--WHERE X.Program not in ('Unknown')
-		--AND 1 = (CASE WHEN @Version ='True North Scorecard' THEN X.Scorecard_eligible ELSE 1 END )
-
-
-		----mastertableall
-		--SELECT X.*, Y.[Y-Axis_Max], Y.[Y-Axis_Min]
-		--FROM DSSI.dbo.TRUE_NORTH_RICHMOND_INDICATORS as X
-		--LEFT JOIN
-		--(
-		--SELECT distinct indicatorID
-		--, CASE WHEN MAX(LEFT([Format],1))='P' AND  ROUND(1.1*MAX([Value]), MAX( CAST(RIGHT([Format],1) as float) )  )>=1 AND indicatorID in ('01','02','03','16') THEN 1
-		--	   WHEN indicatorID in ('07') THEN 1.1*MAX([Value])
-		--	   ELSE ROUND(1.1*MAX([Value]), MAX( CAST(RIGHT([Format],1) as float) )  ) 
-		--END as 'Y-Axis_Max'
-		--, ROUND(IIF(MIN([Value])>=0, 0.9, 1.1)*MIN([Value]), MIN( CAST(RIGHT([Format],1) as float) ) ) as 'Y-Axis_Min'	/*if negative need to make it bigger not smaller so 1.1*/
-		--FROM DSSI.[dbo].[TRUE_NORTH_RICHMOND_INDICATORS]
-		--GROUP BY IndicatorID
-		--) as Y
-		--ON X.IndicatorID=Y.IndicatorID
-		--WHERE 1 = (CASE WHEN @Version ='True North Scorecard' THEN X.Scorecard_eligible ELSE 1 END )
+	--SELECT distinct X.*
+	--FROM DSSI.dbo.TRUE_NORTH_RICHMOND_INDICATORS as X
+	--INNER JOIN mostRecent  as Y
+	--ON  X.TimeFrame=Y.LatestTimeFrame
+	--AND X.Program=Y.Program
+	--AND X.IndicatorName=Y.IndicatorName
+	--OR  X.indicatorID in ('08')
+	--WHERE X.Program not in ('Unknown')
+	--AND X.Scorecard_eligible=1
+	----AND 1 = (CASE WHEN @Version ='True North Scorecard' THEN X.Scorecard_eligible ELSE 1 END )
+	--ORDER BY IndicatorID ASC, Program ASC
 
 	------------------------------------
 	-- Year over year version
@@ -4375,7 +4370,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 		--FROM [DSSI].[dbo].[TRUE_NORTH_RICHMOND_INDICATORS_YOY] as X
 		--LEFT JOIN
 		--(
-		--	SELECT distinct indicatorID
+		--	SELECT distinct indicatorIDa
 		--	, CASE	WHEN indicatorID='01' THEN 1
 		--			ELSE MAX([Value])
 		--	END as 'Y-Axis_Max'
