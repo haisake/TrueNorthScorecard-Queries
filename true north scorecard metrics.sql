@@ -1398,7 +1398,7 @@ DSSI.dbo.RollingFiscalYear
 	ON X.FinSiteID=Y.FinSiteID
 	AND X.CostCenterCode =Y.CostCenterCode
 	AND Y.ProgramDesc is not NULL
-	GROUP BY X.FiscalPeriodEndDate
+		GROUP BY X.FiscalPeriodEndDate
 	, X.FiscalPeriodStartDate
 	, X.FiscalPeriodLong
 	, X.EntityDesc
@@ -1497,7 +1497,7 @@ DSSI.dbo.RollingFiscalYear
 	, 0 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Exceptional Care' as 'IndicatorCategory'
-	, 'Avg. Inpatient Days' as 'Units'
+	, '% of beds occupied' as 'Units'
 	INTO #TNR_ID11
 	FROM #TNR_inpatientDaysPGRM
 	WHERE EntityDesc='Richmond Health Services'		--only want the richmond IP days.
@@ -1505,7 +1505,7 @@ DSSI.dbo.RollingFiscalYear
 	GO
 
 	--only unallocated can have 0 beds occupied legitimately
-	DELETE FROM #TNR_ID11 WHERE program not like  '%Unallocated%' AND Numerator=0	--records are too early
+	DELETE FROM #TNR_ID11 WHERE program not like  '%Unallocated%' AND Denominator=0	--records are too early
 	;
 	GO
 
@@ -2141,6 +2141,8 @@ refer to version 4 June if you want that back, but I can't see why you would.
 		Date Modified: April 1, 2019
 		Inclusions/Exclusions: 
 		Comments:
+			May need to add 0 logics. 0 Ortho surgeries recorded in 2020/21-P01.
+
 	*/
 	IF OBJECT_ID('tempdb.dbo.#TNR_excludeORCodes') IS NOT NULL DROP TABLE #TNR_excludeORCodes;
 	GO
@@ -2165,9 +2167,9 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, FiscalPeriodLong as 'TimeFrameLabel'
 	, 'Fiscal Period' as 'TimeFrameType'
 	, '% Surgical Cases Treated Within Target Wait Time' as 'IndicatorName'
-	, sum(cast(O.ismeetingtarget as int)) as 'Numerator'
+	, COUNT( CASE WHEN O.ismeetingtarget =1 THEN 1 ELSE NULL END) as 'Numerator'
 	, count(*) as 'Denominator'
-	, 1.0*sum(cast(O.ismeetingtarget as int))/count(*)  as 'Value'
+	, 1.0*COUNT( CASE WHEN O.ismeetingtarget =1 THEN 1 ELSE NULL END)/count(*)  as 'Value'
 	, 'Above' as 'DesiredDirection'
 	, 'P1' as 'Format'
 	, 0.85 as 'Target'
@@ -2200,9 +2202,9 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, FiscalPeriodLong as 'TimeFrameLabel'
 	, 'Fiscal Period' as 'TimeFrameType'
 	, '% Surgical Cases Treated Within Target Wait Time' as 'IndicatorName'
-	, sum(cast(O.ismeetingtarget as int)) as 'Numerator'
+	, COUNT( CASE WHEN O.ismeetingtarget =1 THEN 1 ELSE NULL END) as 'Numerator'
 	, count(*) as 'Denominator'
-	, 1.0*sum(cast(O.ismeetingtarget as int))/count(*)  as 'Value'
+	, 1.0*COUNT( CASE WHEN O.ismeetingtarget =1 THEN 1 ELSE NULL END)/count(*)  as 'Value'
 	, 'Above' as 'DesiredDirection'
 	, 'P1' as 'Format'
 	, 0.85 as 'Target'
@@ -2223,6 +2225,42 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	group by O.facilityLongName
 	, T.FiscalPeriodLong
 	, T.FiscalPeriodEndDate
+	;
+	GO
+
+	--create all periods and specialities so we can create 0 volumes when required
+	IF OBJECT_ID('tempdb.dbo.#placeholder_16') IS NOT NULL DROP TABLE #placeholder_16;
+	GO
+
+	SELECT * 
+	INTO #placeholder_16
+	FROM 
+	--pull time frame attrbiutes assuming each is populated by something
+	(SELECT distinct TimeFrameLabel, TimeFrameType, TimeFrame FROM #TNR_ID16) as X
+	CROSS JOIN 
+	(	--pull attributse from the indicator table
+		SELECT distinct IndicatorID, Facility, LoggedMainsurgeonSpecialty, IndicatorName, DesiredDirection, [Format]
+		, 0.85 as 'Target'	--should be a copy of the logic in the indicator computation above
+		, DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units
+		FROM #TNR_ID16	) as Y
+	;
+	GO
+
+	--insert 0 rows where appliable
+	INSERT INTO #TNR_ID16 (IndicatorID, Facility, LoggedMainsurgeonSpecialty, TimeFrame, TimeFrameLabel, TimeFrameType, IndicatorName, Numerator, Denominator, [Value], DesiredDirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units)
+	SELECT X.IndicatorID
+	, X.Facility, X.LoggedMainsurgeonSpecialty, X.TimeFrame, X.TimeFrameLabel, X.TimeFrameType, X.IndicatorName
+	, ISNULL(Y.[Numerator],0) as 'Numerator'
+	, ISNULL(Y.[Denominator],0) as 'Denominator'
+	, ISNULL(Y.[Value],0) as 'Value'	--this is undefined technically as 0/0 but in this case we want to show a 0% rate because no surgeries are being performed, rather than 100% and we can settle the definition
+	, X.DesiredDirection, X.[Format], X.[Target], X.DataSource, X.IsOverall, X.Scorecard_eligible, X.IndicatorCategory, X.Units
+	FROM #placeholder_16 as X
+	LEFT JOIN #TNR_ID16 as Y
+	ON X.IndicatorID=Y.IndicatorID
+	AND X.Facility=Y.Facility
+	AND X.LoggedMainsurgeonSpecialty=Y.LoggedMainsurgeonSpecialty
+	AND X.TimeFrame=Y.TimeFrame
+	WHERE Y.[Value] is null
 	;
 	GO
 
@@ -4210,12 +4248,67 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	GO
 
 	-----------------------------------
+	-- Identify which programs charts will be shown on the scorecard 
+	-----------------------------------
+	ALTER TABLE #TNR_FinalUnion
+	ADD Hide_Chart int;
+	GO
+
+	IF OBJECT_ID('tempdb.dbo.#showCharts') is not null drop table #showCharts;
+	GO
+
+	-- Keep 5 largest programs by indicator and facility where program is not unknown for the lastest timeframe for each indicator
+	SELECT distinct Z.IndicatorID, Z.Facility, Z.Program
+	INTO #showCharts
+	FROM (
+		-- where denominator is available
+		SELECT ROW_NUMBER() OVER(Partition by X.IndicatorId, X.facility ORDER BY X.Denominator DESC) as 'rn'
+		, X.*
+		FROM #TNR_FinalUnion as X
+		INNER JOIN (SELECT IndicatorId, Facility, MAX(timeframe) as 'MaxTimeFrame' FROM #TNR_FinalUnion GROUP BY IndicatorId, Facility) as Y
+		ON X.IndicatorID=Y.IndicatorID 
+		AND X.Facility=Y.Facility 
+		AND X.TimeFrame=Y.MaxTimeFrame
+		WHERE Denominator is not NULL
+		AND IsOverall=0
+		AND Program not in ('Unknown','RHS COO Unallocated')	--always remove these programs from being shown
+		AND Scorecard_eligible=1 	--only  for scorecard eligable indicators
+		-- where denominator is not available
+		UNION
+		SELECT ROW_NUMBER() OVER(Partition by A.IndicatorId, A.facility ORDER BY A.[Value] DESC) as 'rn'
+		, A.*
+		FROM #TNR_FinalUnion as A
+		INNER JOIN (SELECT IndicatorId, Facility, MAX(timeframe) as 'MaxTimeFrame' FROM #TNR_FinalUnion GROUP BY IndicatorId, Facility) as B
+		ON A.IndicatorID=B.IndicatorID 
+		AND A.Facility=B.Facility 
+		AND A.TimeFrame=B.MaxTimeFrame
+		WHERE Denominator is NULL
+		AND IsOverall=0
+		AND Program not in ('Unknown','RHS COO Unallocated')	--always remove these programs from being shown
+		AND Scorecard_eligible=1 	--only  for scorecard eligable indicators
+	) Z
+	WHERE rn <=5
+	OR  IndicatorID='16'
+	;
+	GO
+
+	UPDATE X
+	SET hide_chart = CASE WHEN X.Scorecard_eligible=0 OR Y.IndicatorID is not null  THEN 0 ELSE 1 END
+	FROM #TNR_FinalUnion as X
+	LEFT JOIN #showCharts as Y
+	ON X.IndicatorId=Y.IndicatorID
+	AND X.Facility=y.Facility
+	AND X.Program = Y.Program
+	;
+	GO
+
+	-----------------------------------
 	-- Timeseries version
 	-----------------------------------
 		TRUNCATE TABLE DSSI.dbo.TRUE_NORTH_RICHMOND_INDICATORS;
 		GO
 
-		INSERT INTO DSSI.dbo.TRUE_NORTH_RICHMOND_INDICATORS (IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units)
+		INSERT INTO DSSI.dbo.TRUE_NORTH_RICHMOND_INDICATORS (IndicatorID, Facility, Program, TimeFrame, TimeFrameLabel, timeFrameType, IndicatorName, Numerator, Denominator, [Value], Desireddirection, [Format], [Target], DataSource, IsOverall, Scorecard_eligible, IndicatorCategory, Units, Hide_Chart)
 		SELECT * FROM #TNR_FinalUnion
 		;
 		GO
@@ -4323,6 +4416,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 		, P.TwoYearsAgoLabel
 		, X.[Target], X.[Value] as 'LatestYear_Value',  Y.[Value] as 'LastYear_Value', Z.[Value] as 'TwoYearsAgo_Value'
 		, P.units
+		, A.Hide_Chart
 		INTO #TNR_FinalUnion2
 		FROM #skeleton as P
 		LEFT JOIN #TNR_FinalUnion_Mod as X	--get latest year value
@@ -4331,6 +4425,12 @@ refer to version 4 June if you want that back, but I can't see why you would.
 		ON P.IndicatorID = Y.IndicatorID AND P.Facility = Y.Facility AND P.Program  = Y.Program AND P.LastYear    = Y.TimeFrameYear AND P.TimeFrameUnit = Y.TimeFrameUnit
 		LEFT JOIN #TNR_FinalUnion_Mod as Z	--get latest year value
 		ON P.IndicatorID = Z.IndicatorID AND P.Facility = Z.Facility AND P.Program  = Z.Program AND P.TwoYearsAgo = Z.TimeFrameYear AND P.TimeFrameUnit = Z.TimeFrameUnit
+		LEFT JOIN  (SELECT distinct Q.IndicatorID, Q.Facility, Q.Program , Q.Hide_Chart 
+					FROM #TNR_FinalUnion as Q
+					INNER JOIN ( SELECT IndicatorId, Facility, MAX(timeframe) as 'MaxTimeFrame' FROM #TNR_FinalUnion GROUP BY IndicatorId, Facility) as R
+					ON Q.IndicatorID=R.IndicatorID AND Q.Facility=R.Facility AND Q.TimeFrame=R.MaxTimeFrame
+				   ) as A
+		ON P.IndicatorID = A.IndicatorID AND P.Facility = A.Facility AND P.Program  = A.Program
 		--WHERE X.[Value] is not null OR Y.[Value] is not null OR Z.[Value] is not null
 		;
 		GO
@@ -4349,7 +4449,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 		TRUNCATE TABLE DSSI.[dbo].[TRUE_NORTH_RICHMOND_INDICATORS_YOY] ;
 		GO
 
-		INSERT INTO DSSI.[dbo].[TRUE_NORTH_RICHMOND_INDICATORS_YOY] ([IndicatorID],IndicatorName, [Facility], [Program], [FORMAT], DataSource, Scorecard_eligible, [TimeFrameType],DesiredDirection, [TimeFrameUnit], LatestYear, LastYear, TwoYearsAgo, LatestYearLabel, LastYearLabel, TwoYearsAgoLabel, [Target], [LatestYear_Value], [LastYear_Value], [TwoYearsAgo_Value], units )
+		INSERT INTO DSSI.[dbo].[TRUE_NORTH_RICHMOND_INDICATORS_YOY] ([IndicatorID],IndicatorName, [Facility], [Program], [FORMAT], DataSource, Scorecard_eligible, [TimeFrameType],DesiredDirection, [TimeFrameUnit], LatestYear, LastYear, TwoYearsAgo, LatestYearLabel, LastYearLabel, TwoYearsAgoLabel, [Target], [LatestYear_Value], [LastYear_Value], [TwoYearsAgo_Value], units, hide_chart )
 		SELECT * FROM #TNR_FinalUnion2 
 		;
 		GO
@@ -4404,3 +4504,4 @@ refer to version 4 June if you want that back, but I can't see why you would.
 ------------
 -- END QUERY
 ------------
+
