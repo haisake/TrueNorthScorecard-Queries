@@ -3692,7 +3692,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 
 	--factdatarowtypeid=1 for actuals, 2 for others
 	SELECT '39' as 'IndicatorID'
-	, 'Richmond' as 'Facility'
+	, 'Richmond Hospital' as 'Facility'
 	, 'Overall' as 'Program'
 	, REPLACE(I.[SETRptIndLongName], ' (i)','') as 'IndicatorName'
 	, ISF.EntityIndicatorID
@@ -3959,7 +3959,6 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	ON X.TimeFrameLabel=D.FiscalPeriodLong
 	;
 	GO
-
 
 	----Current YTD value if you need it
 	--SELECT IndicatorName, FullFiscalYear, Facility, CASE WHEN FactDataRowTypeID=1 THEN 'Actual'	ELSE 'Target' END as 'Type', FY_YTD
