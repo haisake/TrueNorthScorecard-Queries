@@ -1505,9 +1505,12 @@ DSSI.dbo.RollingFiscalYear
 	GO
 
 	--only unallocated can have 0 beds occupied legitimately
-	DELETE FROM #TNR_ID11 WHERE program not like  '%Unallocated%' AND Denominator=0	--records are too early
+	DELETE FROM #TNR_ID11 
+	WHERE program not like  '%Unallocated%'
+	 AND (Denominator=0 or Numerator=0)	--records are too early	; have an issue with numerator =0 that is also wrong, but it's not addressed
 	;
 	GO
+
 
 --------------------------------------
 -- ID12 OT rate (hr based)
@@ -4253,6 +4256,10 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	ADD Hide_Chart int;
 	GO
 
+	UPDATE #TNR_FinalUnion
+	SET Hide_Chart=1;
+	GO
+
 	IF OBJECT_ID('tempdb.dbo.#showCharts') is not null drop table #showCharts;
 	GO
 
@@ -4270,7 +4277,8 @@ refer to version 4 June if you want that back, but I can't see why you would.
 		AND X.TimeFrame=Y.MaxTimeFrame
 		WHERE Denominator is not NULL
 		AND IsOverall=0
-		AND Program not in ('Unknown','RHS COO Unallocated')	--always remove these programs from being shown
+		AND Program not like '%unallocated%' --always remove these programs from being shown
+		AND Program not in ('Unknown')	--always remove these programs from being shown
 		AND Scorecard_eligible=1 	--only  for scorecard eligable indicators
 		-- where denominator is not available
 		UNION
@@ -4283,7 +4291,8 @@ refer to version 4 June if you want that back, but I can't see why you would.
 		AND A.TimeFrame=B.MaxTimeFrame
 		WHERE Denominator is NULL
 		AND IsOverall=0
-		AND Program not in ('Unknown','RHS COO Unallocated')	--always remove these programs from being shown
+		AND Program not like '%unallocated%' --always remove these programs from being shown
+		AND Program not in ('Unknown')	--always remove these programs from being shown
 		AND Scorecard_eligible=1 	--only  for scorecard eligable indicators
 	) Z
 	WHERE rn <=5
@@ -4291,13 +4300,18 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	;
 	GO
 
+
+	--There are lots of programs that aren't the typical ones not getting flagged
 	UPDATE X
-	SET hide_chart = CASE WHEN X.Scorecard_eligible=0 OR Y.IndicatorID is not null  THEN 0 ELSE 1 END
+	SET X.hide_chart = 0
 	FROM #TNR_FinalUnion as X
 	LEFT JOIN #showCharts as Y
 	ON X.IndicatorId=Y.IndicatorID
 	AND X.Facility=y.Facility
 	AND X.Program = Y.Program
+	WHERE X.Scorecard_eligible=1
+	AND (Y.IndicatorID is not null
+	OR x.Program in ('Overall') )
 	;
 	GO
 
@@ -4458,7 +4472,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 		--------------------
 		--mastertablemostrecent ; same as the time series version
 
-		--master table all
+		----master table all
 		--SELECT X.*
 		--, CASE	WHEN X.IndicatorId not in ('04') THEN ROUND(Y.[Y-Axis_Max],Y.RoundPrecision)
 		--		ELSE ROUND(Z.[Y-Axis_Max],Z.RoundPrecision) 
@@ -4467,40 +4481,42 @@ refer to version 4 June if you want that back, but I can't see why you would.
 		--		ELSE ROUND(Z.[Y-Axis_Min],Z.RoundPrecision) 
 		--END as 'Y-Axis_Min'
 		--FROM [DSSI].[dbo].[TRUE_NORTH_RICHMOND_INDICATORS_YOY] as X
-		--LEFT JOIN
-		--(
-		--	SELECT distinct indicatorIDa
+		--LEFT JOIN (
+		--	SELECT distinct indicatorID
 		--	, CASE	WHEN indicatorID='01' THEN 1
+		--			WHEN indicatorID='11' AND MAX([Value]) >2 THEN 2 
 		--			ELSE MAX([Value])
 		--	END as 'Y-Axis_Max'
-		--		, CASE	WHEN indicatorID in ('01','12','13') THEN 0
+		--	, CASE	WHEN indicatorID in ('01','11','12','13','16','18','40') THEN 0
 		--			ELSE MIN([Value])
 		--	END as 'Y-Axis_Min'	
-		--	, CASE WHEN MAX(LEFT([FORMAT],1))='P' THEN CAST(MAX(RIGHT([FORMAT],1)) as int) +2
-		--		   ELSE CAST(MAX(RIGHT([FORMAT],1)) as int)
+		--	, CASE	WHEN MAX(LEFT([FORMAT],1))='P' THEN CAST(MAX(RIGHT([FORMAT],1)) as int) +2
+		--			ELSE CAST(MAX(RIGHT([FORMAT],1)) as int)
 		--	END as 'RoundPrecision'
 		--	FROM DSSI.[dbo].[TRUE_NORTH_RICHMOND_INDICATORS]
 		--	WHERE indicatorID !='04'
+		--	AND [Value] is not null
+		--	AND Hide_Chart =0
 		--	GROUP BY IndicatorID
 		--) as Y
 		--ON X.IndicatorID=Y.IndicatorID
-		--LEFT JOIN
-		--(
+		--LEFT JOIN (
 		--	SELECT distinct indicatorID
 		--	, Program
 		--	, MAX([Value]) as 'Y-Axis_Max'
 		--	, MIN([Value]) as 'Y-Axis_Min'	
-		--	, CASE WHEN MAX(LEFT([FORMAT],1))='P' THEN CAST(MAX(RIGHT([FORMAT],1)) as int) +2
-		--		   ELSE CAST(MAX(RIGHT([FORMAT],1)) as int)
+		--	, CASE	WHEN MAX(LEFT([FORMAT],1))='P' THEN CAST(MAX(RIGHT([FORMAT],1)) as int) +2
+		--			ELSE CAST(MAX(RIGHT([FORMAT],1)) as int)
 		--	END as 'RoundPrecision'
 		--	FROM DSSI.[dbo].[TRUE_NORTH_RICHMOND_INDICATORS]
 		--	WHERE indicatorID ='04'
 		--	GROUP BY IndicatorID, Program
 		--) as Z
 		--ON X.IndicatorID=Z.IndicatorID AND X.Program=Z.Program
-		--WHERE 1 = (CASE WHEN @Version ='True North Scorecard' THEN X.Scorecard_eligible ELSE 1 END )
+		--WHERE 1 =  X.Scorecard_eligible
+		--;
+		--ORDER BY IndicatorID ASC, Program ASC, TimeFrameUnit ASC 
 
 ------------
 -- END QUERY
 ------------
-
