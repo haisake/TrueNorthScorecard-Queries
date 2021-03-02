@@ -79,7 +79,7 @@ DSSI.dbo.RollingFiscalYear
 		IF OBJECT_ID('tempdb.dbo.#tnr_inpatientDaysByCC') is not null DROP TABLE #tnr_inpatientDaysByCC;
 		GO
 
-		SELECT D.FiscalYearLong, D.FiscalPeriod, D.FiscalPeriodLong, D.FiscalPeriodStartDate, D.FiscalPeriodEndDate,  cc.CostCenterCode, ledger.FinSiteID, P.EntityDesc
+		SELECT D.FiscalYearLong, D.FiscalPeriod, D.FiscalPeriodLong, D.FiscalPeriodStartDate, D.FiscalPeriodEndDate,  cc.CostCenterCode, cc.CostCenterDesc, ledger.FinSiteID, P.EntityDesc
 		, ledger.GLAccountCode
 		, ISNULL(sum(ledger.BudgetAmt), 0.00) as 'BudgetedCensusDays'	--historical periods don't have values recorded so they are 0. Future records are not actually 0 untill some date. This is because the budget extends into the future
 		, ISNULL(sum(ledger.ActualAmt),0.00) as 'ActualCensusDays'		--historical periods don't have values recorded so they are 0 Future records are not actually 0 untill some date. This is because the budget extends into the future
@@ -92,7 +92,59 @@ DSSI.dbo.RollingFiscalYear
 		INNER JOIN #TNR_FPReportTF as D					--only fiscal year/period we want to report on as defined in #hppd_fp
 		ON ledger.FiscalPeriodEndDateID=d.FiscalPeriodEndDateID	--same fiscal period and year
 		WHERE (ledger.GLAccountCode like '%S403%')	--S403 is all inpatient day accounts this includes the new born accounts. S404 is for residential care days and used in the BSc, but it doens't catch any thing. The BSC inpatient days excludes 'S403410','S403430' which are IP accounts for Inpatient Days - Newborn, Inpatient Days ICU Nursery respectively
-		GROUP BY D.FiscalYearLong, D.FiscalPeriod, D.FiscalPeriodLong, D.FiscalPeriodStartDate, D.FiscalPeriodEndDate,  cc.CostCenterCode, ledger.FinSiteID, P.EntityDesc, ledger.GLAccountCode
+		GROUP BY D.FiscalYearLong, D.FiscalPeriod, D.FiscalPeriodLong, D.FiscalPeriodStartDate, D.FiscalPeriodEndDate,  cc.CostCenterCode, cc.CostCenterDesc, ledger.FinSiteID, P.EntityDesc, ledger.GLAccountCode
+		GO
+
+
+		--compute and store indicators
+		IF OBJECT_ID('tempdb.dbo.#TNR_inpatientDaysPGRM') IS NOT NULL DROP TABLE #TNR_inpatientDaysPGRM;
+		GO
+
+		SELECT X.FiscalPeriodEndDate
+		, X.FiscalPeriodStartDate
+		, X.FiscalPeriodLong
+		, X.EntityDesc
+		, Y.ProgramDesc
+		, SUM( CASE WHEN Y.ProgramDesc like '%Pop%' THEN BudgetedCensusDays
+					WHEN X.GLAccountCode in ('S403105', 'S403107', 'S403145') THEN BudgetedCEnsusDays
+					ELSE 0
+				END
+		) as 'BudgetedCensusDays'
+		, SUM( CASE WHEN Y.ProgramDesc like '%Pop%' THEN ActualCensusDays
+					WHEN X.GLAccountCode in ('S403105', 'S403107', 'S403145') THEN ActualCensusDays
+					ELSE 0
+				END
+		) as 'ActualCensusDays'
+		INTO #TNR_inpatientDaysPGRM
+		FROM #tnr_inpatientDaysByCC as X
+		INNER JOIN FinanceMart.Finance.EntityProgramSubProgram as Y
+		ON X.FinSiteID=Y.FinSiteID
+		AND X.CostCenterCode =Y.CostCenterCode
+		AND Y.ProgramDesc is not NULL
+			GROUP BY X.FiscalPeriodEndDate
+		, X.FiscalPeriodStartDate
+		, X.FiscalPeriodLong
+		, X.EntityDesc
+		, Y.ProgramDesc
+		UNION
+		SELECT X.FiscalPeriodEndDate
+		, X.FiscalPeriodStartDate
+		, X.FiscalPeriodLong
+		, X.EntityDesc
+		, 'Overall' as 'ProgramDesc'
+		, SUM( BudgetedCensusDays) as 'BudgetedCensusDays'
+		, SUM( ActualCensusDays) as 'ActualCensusDays'
+		FROM #tnr_inpatientDaysByCC as X
+		INNER JOIN FinanceMart.Finance.EntityProgramSubProgram as Y
+		ON X.FinSiteID=Y.FinSiteID
+		AND X.CostCenterCode =Y.CostCenterCode
+		AND Y.ProgramDesc is not NULL
+		WHERE X.GLAccountCode in ('S403105', 'S403107', 'S403145')	--exclude the NICU/SCN days
+		GROUP BY X.FiscalPeriodEndDate
+		, X.FiscalPeriodStartDate
+		, X.FiscalPeriodLong
+		, X.EntityDesc
+		;
 		GO
 
 	-------------------
@@ -1069,7 +1121,7 @@ DSSI.dbo.RollingFiscalYear
 	GO
 
 -----------------------------------------------
--- ID07 ALC rate Discharge Based Excluding NewBorns
+-- ID07 ALC rate Excluding NewBorns and MHSU
 -----------------------------------------------
 	/*
 	Purpose: To compute how many inpatient days were ALC vs. all inpatient days for patients discharged in the reporting time frame.
@@ -1085,148 +1137,282 @@ DSSI.dbo.RollingFiscalYear
 	Comments:
 	*/
 
-	--links census data which has ALC information with admission/discharge information
-	IF OBJECT_ID('tempdb.dbo.#TNR_discharges_07') IS NOT NULL DROP TABLE #TNR_discharges_07;
-	GO
+	----------------------------------
+	---- Finance Definition
+	----------------------------------
 
-	SELECT AccountNumber
-	, T.FiscalPeriodLong
-	, T.FiscalPeriodEndDate
-	, A.DischargeNursingUnitDesc
-	, ISNULL(MAP.NewProgram,'Unknown') as 'Program'
-	, A.DischargeFacilityLongName
-	, A.[site]
-	INTO #TNR_discharges_07
-	FROM ADTCMart.[ADTC].[vwAdmissionDischargeFact] as A
-	INNER JOIN #TNR_FPReportTF as T						--identify the week
-	ON A.AdjustedDischargeDate BETWEEN T.FiscalPeriodStartDate AND T.FiscalPeriodEndDate
-	LEFT JOIN DSSI.[dbo].[RH_VisibilityWall_NU_PROGRAM_MAP_ADTC] as MAP	--identify the program
-	ON A.DischargeNursingUnitCode = MAP.nursingunitcode
-	AND A.AdjustedDischargeDate BETWEEN MAP.StartDate AND MAP.EndDate
-	WHERE A.[Site]='rmd'
-	AND A.[AdjustedDischargeDate] is not null		--discharged
-	AND A.[DischargePatientServiceCode]<>'NB'		--not a new born
-	AND A.[AccountType]='I'							--inpatient at richmond only
-	AND A.[AdmissionAccountSubType]='Acute'			--subtype acute; true inpatient
-	AND LEFT(A.DischargeNursingUnitCode,1)!='M'	--excludes ('Minoru Main Floor East','Minoru Main Floor West','Minoru Second Floor East','Minoru Second Floor West','Minoru Third Floor')
-	AND A.AdjustedDischargeDate > (SELECT MIN(FiscalPeriodStartDate) FROM #TNR_FPReportTF)	--discahrges in reporting timeframe
-	;
-	GO
+		--compute and store indicators
+		IF OBJECT_ID('tempdb.dbo.#TNR_inpatientDaysPGRM_ALCdenom') IS NOT NULL DROP TABLE #TNR_inpatientDaysPGRM_ALCdenom;
+		GO
 
-	--links census data which has ALC information with admission/discharge information
-	IF OBJECT_ID('tempdb.dbo.#TNR_ALC_discharges_07') IS NOT NULL DROP TABLE #TNR_ALC_discharges_07;
-	GO
+		SELECT X.FiscalPeriodEndDate
+		, X.FiscalPeriodStartDate
+		, X.FiscalPeriodLong
+		, X.EntityDesc
+		, Y.ProgramDesc
+		, SUM( CASE WHEN Y.ProgramDesc like '%Pop%' THEN BudgetedCensusDays
+					WHEN X.GLAccountCode in ('S403105', 'S403145') THEN BudgetedCensusDays
+					ELSE 0
+				END
+		) as 'BudgetedDays'
+		, SUM( CASE WHEN Y.ProgramDesc like '%Pop%' THEN ActualCensusDays
+					WHEN X.GLAccountCode in ('S403105', 'S403145') THEN ActualCensusDays
+					ELSE 0
+				END
+		) as 'ActualDays'
+		INTO #TNR_inpatientDaysPGRM_ALCdenom
+		FROM #tnr_inpatientDaysByCC as X
+		INNER JOIN FinanceMart.Finance.EntityProgramSubProgram as Y
+		ON X.FinSiteID=Y.FinSiteID
+		AND X.CostCenterCode =Y.CostCenterCode
+		AND Y.ProgramDesc is not NULL
+		--filters by account are done in the case statement ebcause we're not consistent on purpose
+		GROUP BY X.FiscalPeriodEndDate
+		, X.FiscalPeriodStartDate
+		, X.FiscalPeriodLong
+		, X.EntityDesc
+		, Y.ProgramDesc
+		;
+		GO
 
-	--pull in ALC days per case
-	SELECT C.AccountNum
-	, SUM(CASE WHEN patientservicecode like 'AL[0-9]' or patientservicecode like 'A1[0-9]' THEN 1 ELSE 0 END) as 'ALC_Days'
-	, COUNT(*) as 'Census_Days'
-	INTO #TNR_ALC_discharges_07
-	FROM ADTCMart.adtc.vwCensusFact as C
-	WHERE exists (SELECT 1 FROM #TNR_discharges_07 as Y WHERE C.AccountNum=Y.AccountNumber AND C.[Site]=Y.[Site])
-	GROUP BY C.AccountNum
-	;
-	GO
+		--compute and store indicators
+		IF OBJECT_ID('tempdb.dbo.#TNR_inpatientDaysPGRM_ALCnum') IS NOT NULL DROP TABLE #TNR_inpatientDaysPGRM_ALCnum;
+		GO
+
+		SELECT X.FiscalPeriodEndDate
+		, X.FiscalPeriodStartDate
+		, X.FiscalPeriodLong
+		, X.EntityDesc
+		, Y.ProgramDesc
+		, SUM( 1.0*BudgetedCensusDays) as 'BudgetedDays'
+		, SUM( 1.0*ActualCensusDays	) as 'ActualDays'
+		INTO #TNR_inpatientDaysPGRM_ALCnum
+		FROM #tnr_inpatientDaysByCC as X
+		INNER JOIN FinanceMart.Finance.EntityProgramSubProgram as Y
+		ON X.FinSiteID=Y.FinSiteID
+		AND X.CostCenterCode =Y.CostCenterCode
+		AND Y.ProgramDesc is not NULL
+		WHERE X.GLAccountCode in ('S403145') --filters done here because it makes more sense in the numerator case
+		GROUP BY X.FiscalPeriodEndDate
+		, X.FiscalPeriodStartDate
+		, X.FiscalPeriodLong
+		, X.EntityDesc
+		, Y.ProgramDesc
+		;
+		GO
 
 	--compute and store metric
-	IF OBJECT_ID('tempdb.dbo.#TNR_ID07') IS NOT NULL DROP TABLE #TNR_ID07;
+	IF OBJECT_ID('tempdb.dbo.#TNR_ID07') is not null DROP TABLE #TNR_ID07;
 	GO
 
-	SELECT 	'07' as 'IndicatorID'
-	, X.DischargeFacilityLongName as 'Facility'
-	, X.Program as 'Program'
-	, FiscalPeriodEndDate as 'TimeFrame'
-	, FiscalPeriodLong as 'TimeFrameLabel'
+	--by program
+	SELECT '07' as 'IndicatorID'
+	, 'Richmond' as 'Facility'
+	, D.ProgramDesc as 'Program'
+	, D.FiscalPeriodEndDate as 'TimeFrame'
+	, D.FiscalPeriodLong as 'TimeFrameLabel'
 	, 'Fiscal Period' as 'TimeFrameType'
-	, 'ALC Rate Based on Discharges' as 'IndicatorName'
-	, SUM(Y.ALC_Days) as 'Numerator'
-	, SUM(Y.Census_Days) as 'Denominator'
-	, 1.0*SUM(Y.ALC_Days)/SUM(Y.Census_Days) as 'Value'
+	, 'ALC Rate' as 'IndicatorName' 
+	, ISNULL(N.ActualDays,0) as 'Numerator'
+	, D.ActualDays as 'Denominator'
+	, 1.0* ISNULL(N.ActualDays,0) / D.ActualDays as 'Value'
 	, 'Below' as 'DesiredDirection'
 	, 'P0' as 'Format'
-	--, CASE WHEN X.FiscalPeriodEndDate between '4/1/2013' and '3/31/2014' THEN 0.099
-	--	   WHEN X.FiscalPeriodEndDate between '4/1/2014' and '3/31/2015' THEN 0.11
-	--	   WHEN X.FiscalPeriodEndDate between '4/1/2015' and '3/31/2016' THEN 0.115
-	--	   ELSE 0.115 
-	--END 
-	, CAST(NULL as float) as 'Target'
-	, 'ADTCMart' as 'DataSource'
+	, 1.0*ISNULL(N.BudgetedDays,0)/IIF(D.BudgetedDays=0,1,D.BudgetedDays) as 'Target'	--finance target
+	, 'FinanceMart' as 'DataSource'
 	, 0 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Exceptional Care' as 'IndicatorCategory'
 	, '% Rate' as 'Units'
 	INTO #TNR_ID07
-	FROM #TNR_discharges_07 as X
-	LEFT JOIN #TNR_ALC_discharges_07 as Y
-	ON X.AccountNumber=Y.AccountNum
-	GROUP BY X.FiscalPeriodLong
-	, X.FiscalPeriodEndDate
-	, X.Program
-	, X.DischargeFacilityLongName
+	FROM #TNR_inpatientDaysPGRM_ALCnum as N
+	RIGHT JOIN #TNR_inpatientDaysPGRM_ALCdenom as D
+	ON N.ProgramDesc =D.ProgramDesc
+	AND N.FiscalPeriodLong = D.FiscalPeriodLong
+	AND N.EntityDesc = D.EntityDesc
+	WHERE D.EntityDesc='Richmond Health Services' --richmond only
+	AND D.ActualDays >0
 	--add overall
-	UNION 
+	UNION
 	SELECT '07' as 'IndicatorID'
-	, X.DischargeFacilityLongName as 'Facility'
+	, 'Richmond' as 'Facility'
 	, 'Overall' as 'Program'
-	, FiscalPeriodEndDate as 'TimeFrame'
-	, FiscalPeriodLong as 'TimeFrameLabel'
+	, D.FiscalPeriodEndDate as 'TimeFrame'
+	, D.FiscalPeriodLong as 'TimeFrameLabel'
 	, 'Fiscal Period' as 'TimeFrameType'
-	, 'ALC Rate Based on Discharges' as 'IndicatorName'
-	, SUM(Y.ALC_Days) as 'Numerator'
-	, SUM(Y.Census_Days) as 'Denominator'
-	, 1.0*SUM(Y.ALC_Days)/SUM(Y.Census_Days) as 'Value'
+	, 'ALC Rate' as 'IndicatorName' 
+	, SUM(ISNULL(N.ActualDays,0)) as 'Numerator'
+	, SUM(D.ActualDays) as 'Denominator'
+	, 1.0* SUM( ISNULL(N.ActualDays,0) ) / SUM(D.ActualDays) as 'Value'
 	, 'Below' as 'DesiredDirection'
 	, 'P0' as 'Format'
-	--, CASE WHEN X.FiscalPeriodEndDate between '4/1/2013' and '3/31/2014' THEN 0.099
-	--	   WHEN X.FiscalPeriodEndDate between '4/1/2014' and '3/31/2015' THEN 0.11
-	--	   WHEN X.FiscalPeriodEndDate between '4/1/2015' and '3/31/2016' THEN 0.115
-	--	   ELSE 0.115 
-	--END 
-	, CAST(NULL as float) as 'Target'
-	, 'ADTCMart' as 'DataSource'
+	, 1.0*SUM(ISNULL(N.BudgetedDays,0))/SUM( IIF(D.BudgetedDays=0,1,D.BudgetedDays) ) as 'Target'	--finance target
+	, 'FinanceMart' as 'DataSource'
 	, 1 as 'IsOverall'
 	, 1 as 'Scorecard_eligible'
 	, 'Exceptional Care' as 'IndicatorCategory'
 	, '% Rate' as 'Units'
-	FROM #TNR_discharges_07 as X
-	LEFT JOIN #TNR_ALC_discharges_07 as Y
-	ON X.AccountNumber=Y.AccountNum
-	GROUP BY X.FiscalPeriodLong
-	, X.FiscalPeriodEndDate
-	, X.DischargeFacilityLongName
+	FROM #TNR_inpatientDaysPGRM_ALCnum as N
+	RIGHT JOIN #TNR_inpatientDaysPGRM_ALCdenom as D
+	ON N.ProgramDesc =D.ProgramDesc
+	AND N.FiscalPeriodLong = D.FiscalPeriodLong
+	AND N.EntityDesc = D.EntityDesc
+	WHERE D.EntityDesc='Richmond Health Services' --richmond only
+	AND D.ActualDays >0
+	AND D.ProgramDesc != 'Mental Health'	--exclude MHSU from the total due to specs
+	GROUP BY D.FiscalPeriodEndDate
+	, D.FiscalPeriodLong
 	;
 	GO
 
-	--ALC targets for richmond overall from BSI to match BSC, will apply to all programs
-	IF OBJECT_ID('tempdb.dbo.#TNR_ID07_targets') IS NOT NULL DROP TABLE #TNR_ID07_targets;
-	GO
 
-	SELECT LEFT(FullFiscalYear,2)+RIGHT(FullFiscalYear,2) as 'FiscalYear'
-	, CASE WHEN EntityIndicatorID = 35 THEN 'Richmond Hospital'
-		   WHEN EntityIndicatorID = 34 THEN 'Vancouver General Hospital'
-		   WHEN EntityIndicatorID = 33 THEN 'Overall'
-		   ELSE 'Unmapped'
-	END as 'Facility'
-	, [FY_YTD]/100 as 'Target'
-	INTO #TNR_ID07_targets
-	FROM BSI.[BSI].[IndicatorSummaryFact] 
-	WHERE indicatorID=5		--ALC indicator on BSC as of 20190801
-	and EntityIndicatorID=35 --richmond overall
-	and FactDataRowTypeID=2 --target data
-	AND [FY_YTD]  is not null
-	;
-	GO
+	----------------------------------
+	---- ADTC Definition
+	----------------------------------
+	---- links census data which has ALC information with admission/discharge information
+	--IF OBJECT_ID('tempdb.dbo.#TNR_discharges_07') IS NOT NULL DROP TABLE #TNR_discharges_07;
+	--GO
 
-	-- update targets
-	UPDATE X
-	SET [Target] = Y.[Target]
-	FROM #TNR_ID07 as X
-	INNER JOIN #TNR_ID07_targets as Y
-	ON X.Facility=Y.Facility	--same facility
-	AND LEFT(X.TimeFrameLabel,4) = Y.FiscalYear --same fiscal year
-	--AND X.Program=Y.Program	; no program in BSI apply blanket rate target to all services
-	;
-	GO
+	--SELECT AccountNumber
+	--, T.FiscalPeriodLong
+	--, T.FiscalPeriodEndDate
+	--, A.DischargeNursingUnitDesc
+	--, ISNULL(MAP.NewProgram,'Unknown') as 'Program'
+	--, A.DischargeFacilityLongName
+	--, A.[site]
+	--INTO #TNR_discharges_07
+	--FROM ADTCMart.[ADTC].[vwAdmissionDischargeFact] as A
+	--INNER JOIN #TNR_FPReportTF as T						--identify the week
+	--ON A.AdjustedDischargeDate BETWEEN T.FiscalPeriodStartDate AND T.FiscalPeriodEndDate
+	--LEFT JOIN DSSI.[dbo].[RH_VisibilityWall_NU_PROGRAM_MAP_ADTC] as MAP	--identify the program
+	--ON A.DischargeNursingUnitCode = MAP.nursingunitcode
+	--AND A.AdjustedDischargeDate BETWEEN MAP.StartDate AND MAP.EndDate
+	--WHERE A.[Site]='rmd'
+	--AND A.[AdjustedDischargeDate] is not null		--discharged
+	--AND A.[DischargePatientServiceCode]<>'NB'		--not a new born
+	--AND A.[AccountType]='I'							--inpatient at richmond only
+	--AND A.[AdmissionAccountSubType]='Acute'			--subtype acute; true inpatient
+	--AND LEFT(A.DischargeNursingUnitCode,1)!='M'	--excludes ('Minoru Main Floor East','Minoru Main Floor West','Minoru Second Floor East','Minoru Second Floor West','Minoru Third Floor')
+	--AND A.AdjustedDischargeDate > (SELECT MIN(FiscalPeriodStartDate) FROM #TNR_FPReportTF)	--discahrges in reporting timeframe
+	--;
+	--GO
+
+	----links census data which has ALC information with admission/discharge information
+	--IF OBJECT_ID('tempdb.dbo.#TNR_ALC_discharges_07') IS NOT NULL DROP TABLE #TNR_ALC_discharges_07;
+	--GO
+
+	----pull in ALC days per case
+	--SELECT C.AccountNum
+	--, SUM(CASE WHEN patientservicecode like 'AL[0-9]' or patientservicecode like 'A1[0-9]' THEN 1 ELSE 0 END) as 'ALC_Days'
+	--, COUNT(*) as 'Census_Days'
+	--INTO #TNR_ALC_discharges_07
+	--FROM ADTCMart.adtc.vwCensusFact as C
+	--WHERE exists (SELECT 1 FROM #TNR_discharges_07 as Y WHERE C.AccountNum=Y.AccountNumber AND C.[Site]=Y.[Site])
+	--GROUP BY C.AccountNum
+	--;
+	--GO
+
+	----compute and store metric
+	--IF OBJECT_ID('tempdb.dbo.#TNR_ID07') IS NOT NULL DROP TABLE #TNR_ID07;
+	--GO
+
+	--SELECT 	'07' as 'IndicatorID'
+	--, X.DischargeFacilityLongName as 'Facility'
+	--, X.Program as 'Program'
+	--, FiscalPeriodEndDate as 'TimeFrame'
+	--, FiscalPeriodLong as 'TimeFrameLabel'
+	--, 'Fiscal Period' as 'TimeFrameType'
+	--, 'ALC Rate Based on Discharges' as 'IndicatorName'
+	--, SUM(Y.ALC_Days) as 'Numerator'
+	--, SUM(Y.Census_Days) as 'Denominator'
+	--, 1.0*SUM(Y.ALC_Days)/SUM(Y.Census_Days) as 'Value'
+	--, 'Below' as 'DesiredDirection'
+	--, 'P0' as 'Format'
+	----, CASE WHEN X.FiscalPeriodEndDate between '4/1/2013' and '3/31/2014' THEN 0.099
+	----	   WHEN X.FiscalPeriodEndDate between '4/1/2014' and '3/31/2015' THEN 0.11
+	----	   WHEN X.FiscalPeriodEndDate between '4/1/2015' and '3/31/2016' THEN 0.115
+	----	   ELSE 0.115 
+	----END 
+	--, CAST(NULL as float) as 'Target'
+	--, 'ADTCMart' as 'DataSource'
+	--, 0 as 'IsOverall'
+	--, 1 as 'Scorecard_eligible'
+	--, 'Exceptional Care' as 'IndicatorCategory'
+	--, '% Rate' as 'Units'
+	--INTO #TNR_ID07
+	--FROM #TNR_discharges_07 as X
+	--LEFT JOIN #TNR_ALC_discharges_07 as Y
+	--ON X.AccountNumber=Y.AccountNum
+	--GROUP BY X.FiscalPeriodLong
+	--, X.FiscalPeriodEndDate
+	--, X.Program
+	--, X.DischargeFacilityLongName
+	----add overall
+	--UNION 
+	--SELECT '07' as 'IndicatorID'
+	--, X.DischargeFacilityLongName as 'Facility'
+	--, 'Overall' as 'Program'
+	--, FiscalPeriodEndDate as 'TimeFrame'
+	--, FiscalPeriodLong as 'TimeFrameLabel'
+	--, 'Fiscal Period' as 'TimeFrameType'
+	--, 'ALC Rate Based on Discharges' as 'IndicatorName'
+	--, SUM(Y.ALC_Days) as 'Numerator'
+	--, SUM(Y.Census_Days) as 'Denominator'
+	--, 1.0*SUM(Y.ALC_Days)/SUM(Y.Census_Days) as 'Value'
+	--, 'Below' as 'DesiredDirection'
+	--, 'P0' as 'Format'
+	----, CASE WHEN X.FiscalPeriodEndDate between '4/1/2013' and '3/31/2014' THEN 0.099
+	----	   WHEN X.FiscalPeriodEndDate between '4/1/2014' and '3/31/2015' THEN 0.11
+	----	   WHEN X.FiscalPeriodEndDate between '4/1/2015' and '3/31/2016' THEN 0.115
+	----	   ELSE 0.115 
+	----END 
+	--, CAST(NULL as float) as 'Target'
+	--, 'ADTCMart' as 'DataSource'
+	--, 1 as 'IsOverall'
+	--, 1 as 'Scorecard_eligible'
+	--, 'Exceptional Care' as 'IndicatorCategory'
+	--, '% Rate' as 'Units'
+	--FROM #TNR_discharges_07 as X
+	--LEFT JOIN #TNR_ALC_discharges_07 as Y
+	--ON X.AccountNumber=Y.AccountNum
+	--GROUP BY X.FiscalPeriodLong
+	--, X.FiscalPeriodEndDate
+	--, X.DischargeFacilityLongName
+	--;
+	--GO
+
+	--------------------------------------
+
+	----ALC targets for richmond overall from BSI to match BSC, will apply to all programs
+	--IF OBJECT_ID('tempdb.dbo.#TNR_ID07_targets') IS NOT NULL DROP TABLE #TNR_ID07_targets;
+	--GO
+
+	--SELECT LEFT(FullFiscalYear,2)+RIGHT(FullFiscalYear,2) as 'FiscalYear'
+	--, CASE WHEN EntityIndicatorID = 35 THEN 'Richmond Hospital'
+	--	   WHEN EntityIndicatorID = 34 THEN 'Vancouver General Hospital'
+	--	   WHEN EntityIndicatorID = 33 THEN 'Overall'
+	--	   ELSE 'Unmapped'
+	--END as 'Facility'
+	--, [FY_YTD]/100 as 'Target'
+	--INTO #TNR_ID07_targets
+	--FROM BSI.[BSI].[IndicatorSummaryFact] 
+	--WHERE indicatorID=5		--ALC indicator on BSC as of 20190801
+	--and EntityIndicatorID=35 --richmond overall
+	--and FactDataRowTypeID=2 --target data
+	--AND [FY_YTD]  is not null
+	--;
+	--GO
+
+	---- update targets
+	--UPDATE X
+	--SET [Target] = Y.[Target]
+	--FROM #TNR_ID07 as X
+	--INNER JOIN #TNR_ID07_targets as Y
+	--ON X.Facility=Y.Facility	--same facility
+	--AND LEFT(X.TimeFrameLabel,4) = Y.FiscalYear --same fiscal year
+	----AND X.Program=Y.Program	; no program in BSI apply blanket rate target to all services
+	--;
+	--GO
 
 -----------------------------------------------
 -- ID08 Discharges Actual vs. Predicted
@@ -1373,59 +1559,10 @@ DSSI.dbo.RollingFiscalYear
 	Pop and family health includes the NICU days under S403430 for practical purposes, but the overall does not.
 	*/
 	
-	--compute and store indicators
-	IF OBJECT_ID('tempdb.dbo.#TNR_inpatientDaysPGRM') IS NOT NULL DROP TABLE #TNR_inpatientDaysPGRM;
-	GO
-
-	SELECT X.FiscalPeriodEndDate
-	, X.FiscalPeriodStartDate
-	, X.FiscalPeriodLong
-	, X.EntityDesc
-	, Y.ProgramDesc
-	, SUM( CASE WHEN Y.ProgramDesc like '%Pop%' THEN BudgetedCensusDays
-				WHEN X.GLAccountCode in ('S403105', 'S403107', 'S403145') THEN BudgetedCEnsusDays
-				ELSE 0
-			END
-	) as 'BudgetedCensusDays'
-	, SUM( CASE WHEN Y.ProgramDesc like '%Pop%' THEN ActualCensusDays
-				WHEN X.GLAccountCode in ('S403105', 'S403107', 'S403145') THEN ActualCensusDays
-				ELSE 0
-			END
-	) as 'ActualCensusDays'
-	INTO #TNR_inpatientDaysPGRM
-	FROM #tnr_inpatientDaysByCC as X
-	INNER JOIN FinanceMart.Finance.EntityProgramSubProgram as Y
-	ON X.FinSiteID=Y.FinSiteID
-	AND X.CostCenterCode =Y.CostCenterCode
-	AND Y.ProgramDesc is not NULL
-		GROUP BY X.FiscalPeriodEndDate
-	, X.FiscalPeriodStartDate
-	, X.FiscalPeriodLong
-	, X.EntityDesc
-	, Y.ProgramDesc
 	-----------------------------
 	-- for the overall which has a tweak it excludes some days in Pop&family health under GL account S403430
 	-----------------------------
-	UNION
-	SELECT X.FiscalPeriodEndDate
-	, X.FiscalPeriodStartDate
-	, X.FiscalPeriodLong
-	, X.EntityDesc
-	, 'Overall' as 'ProgramDesc'
-	, SUM( BudgetedCensusDays) as 'BudgetedCensusDays'
-	, SUM( ActualCensusDays) as 'ActualCensusDays'
-	FROM #tnr_inpatientDaysByCC as X
-	INNER JOIN FinanceMart.Finance.EntityProgramSubProgram as Y
-	ON X.FinSiteID=Y.FinSiteID
-	AND X.CostCenterCode =Y.CostCenterCode
-	AND Y.ProgramDesc is not NULL
-	WHERE X.GLAccountCode in ('S403105', 'S403107', 'S403145')	--exclude the NICU/SCN days
-	GROUP BY X.FiscalPeriodEndDate
-	, X.FiscalPeriodStartDate
-	, X.FiscalPeriodLong
-	, X.EntityDesc
-	;
-	GO
+	
 
 	--compute and store indicators
 	IF OBJECT_ID('tempdb.dbo.#TNR_ID10') IS NOT NULL DROP TABLE #TNR_ID10;
@@ -2762,123 +2899,63 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	Purpose: To compute how many census inpatient days in the period were ALC 
 	Author: Hans Aisake
 	Date Created: June 14, 2018
-	Date Updated: Jan 3, 2020
+	Date Updated: Feb 25, 2021
 	Inclusions/Exclusions:
-		- true inpatient records only
-		- excludes newborns
+		- see indicator 07 for details.
+
 	Comments:
-		-fix references to ALC 22 instead of ALC 07 on Jan 3, 2020.
+		- changed to a finance mart definition from and ADTC census definition on Feb 25, 2021. This keeps ALC consistent throughout this product.
 	*/
-
-	--find alc days in the census
-	IF OBJECT_ID('tempdb.dbo.#TNR_ALC_days_22') IS NOT NULL DROP TABLE #TNR_ALC_days_22;
-	GO
-
-	--pull in ALC days per case
-	SELECT T.FiscalPeriodLong
-	, T.FiscalPeriodEndDate
-	, C.FacilityLongName
-	, ISNULL(MAP.NewProgram,'Unknown') as 'Program'
-	, SUM(CASE WHEN patientservicecode like 'AL[0-9]' or patientservicecode like 'A1[0-9]' THEN 1 ELSE 0 END) as 'ALC_Days'
-	, COUNT(C.AccountNum) as 'Census_Days'
-	INTO #TNR_ALC_days_22
-	FROM ADTCMart.adtc.vwCensusFact as C
-	INNER JOIN #TNR_FPReportTF as T						--identify the week
-	ON C.CensusDate BETWEEN T.FiscalPeriodStartDate AND T.FiscalPeriodEndDate
-	LEFT JOIN DSSI.[dbo].[RH_VisibilityWall_NU_PROGRAM_MAP_ADTC] as MAP	--identify the program
-	ON C.NursingUnitCode = MAP.nursingunitcode
-	AND C.CensusDate BETWEEN MAP.StartDate AND MAP.EndDate
-	WHERE C.[Site]='rmd'				--richmond only
-	AND C.[PatientServiceCode]<>'NB'		--not a new born
-	AND C.[AccountType] in ('I','Inpatient','391')	--inpatient at richmond is 'I'
-	AND C.[AccountSubType]='Acute'			--subtype acute; true inpatient
-	AND LEFT(C.NursingUnitCode,1)!='M'	--excludes ('Minoru Main Floor East','Minoru Main Floor West','Minoru Second Floor East','Minoru Second Floor West','Minoru Third Floor')
-	GROUP BY T.FiscalPeriodLong
-	, T.FiscalPeriodEndDate
-	, C.FacilityLongName
-	, ISNULL(MAP.NewProgram,'Unknown')
-	;
-	GO
 
 	--compute and store metric
 	IF OBJECT_ID('tempdb.dbo.#TNR_ID22') IS NOT NULL DROP TABLE #TNR_ID22;
 	GO
 
 	SELECT 	'22' as 'IndicatorID'
-	, FacilityLongName as 'Facility'
-	, Program as 'Program'
+	, 'Richmond' as 'Facility'
+	, ProgramDesc as 'Program'
 	, FiscalPeriodEndDate as 'TimeFrame'
 	, FiscalPeriodLong as 'TimeFrameLabel'
 	, 'Fiscal Period' as 'TimeFrameType'
 	, 'ALC Days in the period' as 'IndicatorName'
-	, ALC_Days as 'Numerator'
-	, Census_Days as 'Denominator'
-	, ALC_Days as 'Value'
+	, CAST(NULL as int) as 'Numerator'
+	, CAST(NULL as int) as 'Denominator'
+	, ActualDays as 'Value'
 	, 'Below' as 'DesiredDirection'
 	, 'D0' as 'Format'
-	, CAST(NULL as float) as 'Target'
-	, 'ADTCMart' as 'DataSource'
+	, BudgetedDays as 'Target'
+	, 'FinanceMart' as 'DataSource'
 	, 0 as 'IsOverall'
 	, 0 as 'Scorecard_eligible'
 	, 'True North Metrics' as 'IndicatorCategory'
 	, '# ALC Days' as 'Units'
 	INTO #TNR_ID22
-	FROM #TNR_ALC_days_22
+	FROM #TNR_inpatientDaysPGRM_ALCnum
+	WHERE EntityDesc='Richmond Health Services'
 	--add overall
 	UNION 
 	SELECT '22' as 'IndicatorID'
-	, FacilityLongName as 'Facility'
+	, 'Richmond' as 'Facility'
 	, 'Overall' as 'Program'
 	, FiscalPeriodEndDate as 'TimeFrame'
 	, FiscalPeriodLong as 'TimeFrameLabel'
 	, 'Fiscal Period' as 'TimeFrameType'
 	, 'ALC Days in the period' as 'IndicatorName'
-	, SUM(ALC_Days) as 'Numerator'
-	, SUM(Census_Days) as 'Denominator'
-	, SUM(ALC_Days) as 'Value'
+	, CAST(NULL as int) as 'Numerator'
+	, CAST(NULL as int) as 'Denominator'
+	, SUM(ActualDays) as 'Value'
 	, 'Below' as 'DesiredDirection'
 	, 'D0' as 'Format'
-	, CAST(NULL as float) as 'Target'
-	, 'ADTCMart' as 'DataSource'
+	, SUM(BudgetedDays) as 'Target'
+	, 'FinanceMart' as 'DataSource'
 	, 1 as 'IsOverall'
 	, 0 as 'Scorecard_eligible'
 	, 'True North Metrics' as 'IndicatorCategory'
 	, '# ALC Days' as 'Units'
-	FROM #TNR_ALC_days_22
+	FROM #TNR_inpatientDaysPGRM_ALCnum
+	WHERE EntityDesc='Richmond Health SErvices'
 	GROUP BY FiscalPeriodLong
 	, FiscalPeriodEndDate
-	, FacilityLongName
-	;
-	GO
-
-	--ALC targets for richmond overall from BSI to match BSC, will apply to all programs
-	IF OBJECT_ID('tempdb.dbo.#TNR_ID22_targets') IS NOT NULL DROP TABLE #TNR_ID22_targets;
-	GO
-
-	SELECT LEFT(FullFiscalYear,2)+RIGHT(FullFiscalYear,2) as 'FiscalYear'
-	, CASE WHEN EntityIndicatorID = 35 THEN 'Richmond Hospital'
-		   WHEN EntityIndicatorID = 34 THEN 'Vancouver General Hospital'
-		   WHEN EntityIndicatorID = 33 THEN 'Overall'
-		   ELSE 'Unmapped'
-	END as 'Facility'
-	, [FY_YTD]/100 as 'Target'
-	INTO #TNR_ID22_targets
-	FROM BSI.[BSI].[IndicatorSummaryFact] 
-	WHERE indicatorID=5		--ALC indicator on BSC as of 20190801
-	and EntityIndicatorID=35 --richmond overall
-	and FactDataRowTypeID=2 --target data
-	AND [FY_YTD]  is not null
-	;
-	GO
-	
-	-- update targets
-	UPDATE X
-	SET [Target] = ROUND(Y.[Target]*X.Denominator,0)
-	FROM #TNR_ID22 as X
-	INNER JOIN #TNR_ID22_targets as Y
-	ON X.Facility=Y.Facility	--same facility
-	AND LEFT(X.TimeFrameLabel,4) = Y.FiscalYear --same fiscal year
-	--AND X.Program=Y.Program	; no program in BSI apply blanket rate target to all services
 	;
 	GO
 
@@ -3184,7 +3261,7 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, 'True North Metrics' as 'IndicatorCategory'
 	, 'readmissions rate' as 'Units'
 	FROM #tnr_readmits3
-	WHERE Program !='Mental Health & Addictions Ser'
+	WHERE Program not in ('Mental Health & Addictions Ser','Mental Hlth & Substance Use')
 	GROUP BY IndicatorId
 	, CASE WHEN facility='RHS' THEN 'Richmond Hospital' ELSE NULL END
 	, FiscalPeriodEndDate
@@ -3231,58 +3308,33 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	Purpose: To compute the average number of acute mental health beds occupied.
 	Author: Hans Aisake
 	Date Created: August 20, 2019
-	Date Updated: 
+	Date Updated: Feb 23, 2021
 	Inclusions/Exclusions:
 		- true inpatient records only
 		- excludes newborns
 	Comments:
+		- switched over to a finance based methodology
 		- average census in RPEU and R2W / # of funded beds
 	
 	*/
 
-	--create a table with the funded bed numbers for mental health
-	IF OBJECT_ID('tempdb.dbo.#TNR_MHSU_FundedBeds') is not null DROP TABLE #TNR_MHSU_FundedBeds;
-	GO
-
-	CREATE TABLE #TNR_MHSU_FundedBeds
-	( FiscalYear int
-	  , FAcility varchar(255)
-	  , NursingUnitCode varchar(10)
-	  , FundedBeds int
-	)
-	GO
-
-	-- R2W has had 18 beds for a long time
-	-- RPEU has had 4 beds for a long time
-	INSERT INTO #TNR_MHSU_FundedBeds VALUES
-	(2020, 'Richmond Hospital', 'R2W',18),
-	(2020, 'Richmond Hospital', 'RPEU',4),
-	(2019, 'Richmond Hospital', 'R2W',18),
-	(2019, 'Richmond Hospital', 'RPEU',4),
-	(2018, 'Richmond Hospital', 'R2W',18),
-	(2018, 'Richmond Hospital', 'RPEU',4),
-	(2017, 'Richmond Hospital', 'R2W',18),
-	(2017, 'Richmond Hospital', 'RPEU',4),
-	(2016, 'Richmond Hospital', 'R2W',18),
-	(2016, 'Richmond Hospital', 'RPEU',4)
-	;
-	GO
-
-	--pull census from R2W and RPEU and compute the average census per period	
+	----------------------------------
+	-- Finance Definition
+	----------------------------------
+	----pull IP days by program
 	IF OBJECT_ID('tempdb.dbo.#TNR_MHSU_Census') is not null DROP TABLE #TNR_MHSU_Census;
 	GO
 
-	--get census of RPEU and R2W
 	SELECT '34' as 'IndicatorID'
-	, FacilityLongName as 'Facility'
-	, Map.NewProgram as 'Program'
-	, D.FiscalPeriodEndDate as 'TimeFrame'
-	, D.FiscalPeriodLong as 'TimeFrameLabel'
+	, 'Richmond' as 'Facility'
+	, ProgramDesc as 'Program'
+	, FiscalPeriodEndDate as 'TimeFrame'
+	, FiscalPeriodLong as 'TimeFrameLabel'
 	, 'Fiscal Period' as 'TimeFrameType'
 	, 'Average Number of Acute Mental Health Beds Occupied' as 'IndicatorName' 
-	, SUM(1) as 'Numerator'
-	, DATEDIFF(day, MAX(D.fiscalperiodstartdate), MAX(D.fiscalperiodenddate) ) +1 as 'Denominator'
-	, CEILING(1.0*SUM(1) / DATEDIFF(day, MAX(D.fiscalperiodstartdate), MAX(D.fiscalperiodenddate) ) ) as 'Value'
+	, ActualCensusDays as 'Numerator'
+	, DATEDIFF(day, fiscalperiodstartdate, fiscalperiodenddate ) +1 as 'Denominator'
+	, CEILING(1.0*ActualCensusDays / DATEDIFF(day, fiscalperiodstartdate, fiscalperiodenddate ) ) as 'Value'
 	, 'Below' as 'DesiredDirection'
 	, 'D0' as 'Format'
 	, CAST(NULL as float) as 'Target'	--funded beds
@@ -3292,35 +3344,98 @@ refer to version 4 June if you want that back, but I can't see why you would.
 	, 'True North Metrics' as 'IndicatorCategory' 
 	, '# beds' as 'Units'
 	INTO #TNR_MHSU_Census
-	FROM ADTCMart.adtc.vwCensusFact as ADTC
-	LEFT JOIN DSSI.dbo.RH_VisibilityWall_NU_PROGRAM_MAP_ADTC as MAP
-	ON ADTC.CensusDate BETWEEN MAP.StartDate AND MAP.EndDate		--active map dates
-	AND ADTC.NursingUnitCode=MAP.nursingunitcode	--same nursing unit
-	INNER JOIN #tnr_periods as D
-	ON ADTC.CensusDate BETWEEN D.FiscalPeriodStartDate AND D.FiscalPeriodEndDate
-	WHERE ADTC.nursingunitcode in ('RPEU','R2W') --mental health units only
-	AND ADTC.[Site]='RMD'
-	AND ADTC.AccountType in ('I', 'Inpatient', '391')	--the code is different for each facility. Richmond is Inpatient
-	AND ADTC.AccountSubtype in ('Acute')				--no exclusions other than inpatient
-	GROUP BY ADTC.FacilityLongName
-	, Map.NewProgram
-	, D.FiscalPeriodEndDate
-	, D.FiscalPeriodLong 
+	FROM #TNR_inpatientDaysPGRM as X
+	WHERE EntityDesc='Richmond Health Services' --richmond only
+	AND ProgramDesc = 'Mental Hlth & Substance Use' --MHSU only
 	;
 	GO
 
-	--add funded bed target levels
-	UPDATE X
-	SET [Target] = Y.FundedBeds
-	FROM #TNR_MHSU_Census as X
-	LEFT JOIN (	SELECT FiscalYear, Facility, SUM(FundedBeds) as 'FundedBeds' 
-				FROM #TNR_MHSU_FundedBeds
-				GROUP BY FiscalYear, Facility) as Y
-	ON CAST(LEFT(X.TimeFrameLabel,4) as int) = Y.FiscalYear		--same year
-	AND X.Facility=Y.Facility --same facility
-	;
-	GO
+	--------------------------
+	---- ADTC Definition
+	--------------------------
+
+	----create a table with the funded bed numbers for mental health
+	--IF OBJECT_ID('tempdb.dbo.#TNR_MHSU_FundedBeds') is not null DROP TABLE #TNR_MHSU_FundedBeds;
+	--GO
+
+	--CREATE TABLE #TNR_MHSU_FundedBeds
+	--( FiscalYear int
+	--  , FAcility varchar(255)
+	--  , NursingUnitCode varchar(10)
+	--  , FundedBeds int
+	--)
+	--GO
+
+	---- R2W has had 18 beds for a long time
+	---- RPEU has had 4 beds for a long time
+	--INSERT INTO #TNR_MHSU_FundedBeds VALUES
+	--(2020, 'Richmond Hospital', 'R2W',18),
+	--(2020, 'Richmond Hospital', 'RPEU',4),
+	--(2019, 'Richmond Hospital', 'R2W',18),
+	--(2019, 'Richmond Hospital', 'RPEU',4),
+	--(2018, 'Richmond Hospital', 'R2W',18),
+	--(2018, 'Richmond Hospital', 'RPEU',4),
+	--(2017, 'Richmond Hospital', 'R2W',18),
+	--(2017, 'Richmond Hospital', 'RPEU',4),
+	--(2016, 'Richmond Hospital', 'R2W',18),
+	--(2016, 'Richmond Hospital', 'RPEU',4)
+	--;
+	--GO
+
+	----pull census from R2W and RPEU and compute the average census per period	
+	--IF OBJECT_ID('tempdb.dbo.#TNR_MHSU_Census') is not null DROP TABLE #TNR_MHSU_Census;
+	--GO
+
+	----get census of RPEU and R2W
+	--SELECT '34' as 'IndicatorID'
+	--, FacilityLongName as 'Facility'
+	--, Map.NewProgram as 'Program'
+	--, D.FiscalPeriodEndDate as 'TimeFrame'
+	--, D.FiscalPeriodLong as 'TimeFrameLabel'
+	--, 'Fiscal Period' as 'TimeFrameType'
+	--, 'Average Number of Acute Mental Health Beds Occupied' as 'IndicatorName' 
+	--, SUM(1) as 'Numerator'
+	--, DATEDIFF(day, MAX(D.fiscalperiodstartdate), MAX(D.fiscalperiodenddate) ) +1 as 'Denominator'
+	--, CEILING(1.0*SUM(1) / DATEDIFF(day, MAX(D.fiscalperiodstartdate), MAX(D.fiscalperiodenddate) ) ) as 'Value'
+	--, 'Below' as 'DesiredDirection'
+	--, 'D0' as 'Format'
+	--, CAST(NULL as float) as 'Target'	--funded beds
+	--, 'ADTCMart' as 'DataSource'
+	--, 0 as 'IsOverall'
+	--, 0 as 'Scorecard_eligible'
+	--, 'True North Metrics' as 'IndicatorCategory' 
+	--, '# beds' as 'Units'
+	--INTO #TNR_MHSU_Census
+	--FROM ADTCMart.adtc.vwCensusFact as ADTC
+	--LEFT JOIN DSSI.dbo.RH_VisibilityWall_NU_PROGRAM_MAP_ADTC as MAP
+	--ON ADTC.CensusDate BETWEEN MAP.StartDate AND MAP.EndDate		--active map dates
+	--AND ADTC.NursingUnitCode=MAP.nursingunitcode	--same nursing unit
+	--INNER JOIN #tnr_periods as D
+	--ON ADTC.CensusDate BETWEEN D.FiscalPeriodStartDate AND D.FiscalPeriodEndDate
+	--WHERE ADTC.nursingunitcode in ('RPEU','R2W') --mental health units only
+	--AND ADTC.[Site]='RMD'
+	--AND ADTC.AccountType in ('I', 'Inpatient', '391')	--the code is different for each facility. Richmond is Inpatient
+	--AND ADTC.AccountSubtype in ('Acute')				--no exclusions other than inpatient
+	--GROUP BY ADTC.FacilityLongName
+	--, Map.NewProgram
+	--, D.FiscalPeriodEndDate
+	--, D.FiscalPeriodLong 
+	--;
+	--GO
+
+	----add funded bed target levels
+	--UPDATE X
+	--SET [Target] = Y.FundedBeds
+	--FROM #TNR_MHSU_Census as X
+	--LEFT JOIN (	SELECT FiscalYear, Facility, SUM(FundedBeds) as 'FundedBeds' 
+	--			FROM #TNR_MHSU_FundedBeds
+	--			GROUP BY FiscalYear, Facility) as Y
+	--ON CAST(LEFT(X.TimeFrameLabel,4) as int) = Y.FiscalYear		--same year
+	--AND X.Facility=Y.Facility --same facility
+	--;
+	--GO
 	
+	-----------------------------
 	--compute and store metric
 	IF OBJECT_ID('tempdb.dbo.#TNR_ID34') IS NOT NULL DROP TABLE #TNR_ID34;
 	GO
@@ -3353,183 +3468,182 @@ refer to version 4 June if you want that back, but I can't see why you would.
 -- ID36 % of Placement to Long-Term Care During Period from Richmond Acute & Richmond Community 
 -- Goes into Excel
 -----------------------------------------------
-	/*
-	Purpose: Pull % of placements to LTC from acute and community
-	Author: Hans Aisake
-	Date Created: 2019 September 3
-	Date Modified: 
-	Comments: Program is Home and Community Care
-	-- The LTC team is not running the code to populate this table.
-	I'll need to sneak it into Flora's query.
-	*/
+	--/*
+	--Purpose: Pull % of placements to LTC from acute and community
+	--Author: Hans Aisake
+	--Date Created: 2019 September 3
+	--Date Modified: 
+	--Comments: Program is Home and Community Care
+	---- The LTC team is not running the code to populate this table.
+	--*/
 
-	IF OBJECT_ID('tempdb.dbo.#TNR_ID36_Excel') is not NULL DROP TABLE #TNR_ID36_Excel;
-	GO
+	--IF OBJECT_ID('tempdb.dbo.#TNR_ID36_Excel') is not NULL DROP TABLE #TNR_ID36_Excel;
+	--GO
 
-	SELECT 	'36' as 'IndicatorID'
-	, [Region] as 'Facility'
-	, (SELECT distinct program FROM #TNR_ID01 WHERE program like '%home%') as 'Program'
-	, LEFT(FiscalyearPeriod, 9) as 'FiscalYear'
-	, 'P' + RIGHT(FiscalYearPeriod, 2) as 'FiscalPeriod'
-	, Numerator
-	, Denominator
-	, Measure
-	, '% of Placement to Long-Term Care During Period from RH ' + [Client Location Group] as 'IndicatorName'
-	INTO #TNR_ID36_Excel
-	FROM DSSI.dbo.PriorityAccessIndicators
-	WHERE indicatorId =5	-- % of placements indicator
-	AND Region = 'Richmond'	-- richmond region
-	AND LEFT(FiscalyearPeriod, 9) in ( SELECT distinct TOP 2 LEFT(FiscalyearPeriod, 9) FROM DSSI.dbo.PriorityAccessIndicators ORDER BY LEFT(FiscalyearPeriod, 9) )
-	AND [Client Location Group] in ('Acute','Commuity')	--only want these groups for the TNM
-	;
-	GO
+	--SELECT 	'36' as 'IndicatorID'
+	--, [Region] as 'Facility'
+	--, (SELECT distinct program FROM #TNR_ID01 WHERE program like '%home%') as 'Program'
+	--, LEFT(FiscalyearPeriod, 9) as 'FiscalYear'
+	--, 'P' + RIGHT(FiscalYearPeriod, 2) as 'FiscalPeriod'
+	--, Numerator
+	--, Denominator
+	--, Measure
+	--, '% of Placement to Long-Term Care During Period from RH ' + [Client Location Group] as 'IndicatorName'
+	--INTO #TNR_ID36_Excel
+	--FROM DSSI.dbo.PriorityAccessIndicators
+	--WHERE indicatorId =5	-- % of placements indicator
+	--AND Region = 'Richmond'	-- richmond region
+	--AND LEFT(FiscalyearPeriod, 9) in ( SELECT distinct TOP 2 LEFT(FiscalyearPeriod, 9) FROM DSSI.dbo.PriorityAccessIndicators ORDER BY LEFT(FiscalyearPeriod, 9) )
+	--AND [Client Location Group] in ('Acute','Commuity')	--only want these groups for the TNM
+	--;
+	--GO
 	
 -----------------------------------------------
 -- IDXX Number of Falls - Degree of Harm (2-5), No Harm (1), overall (1-5)
 -----------------------------------------------
-	/*
-	Purpose: Pull Number of Falls for the true north metrics
-	Author: Hans Aisake
-	Co-author: Peter Kaloupis
-	Date Created: 2019 August 26
-	Date Modified: 
-	Comments: Programs are bassed on nursing units Updated programs and put them in a mapping table in DSSI.
-	*/
+	--/*
+	--Purpose: Pull Number of Falls for the true north metrics
+	--Author: Hans Aisake
+	--Co-author: Peter Kaloupis
+	--Date Created: 2019 August 26
+	--Date Modified: 
+	--Comments: Programs are bassed on nursing units Updated programs and put them in a mapping table in DSSI.
+	--*/
 
-	--identify the time frames for the falls. Data comes by month and year, so I'm going to report it by month and year. Mapping it to FP is disingenuous
-	IF OBJECT_ID('tempdb.dbo.#TNR_falls_tf') IS NOT NULL DROP TABLE #TNR_falls_tf;	
-	GO
+	----identify the time frames for the falls. Data comes by month and year, so I'm going to report it by month and year. Mapping it to FP is disingenuous
+	--IF OBJECT_ID('tempdb.dbo.#TNR_falls_tf') IS NOT NULL DROP TABLE #TNR_falls_tf;	
+	--GO
 
-	SELECT distinct TOP 48 [Year], [Month]
-	INTO #TNR_falls_tf
-	FROM [DSSI].[dbo].[RHFallsVisibilityWall]	--is null need to get this data back again.
-	ORDER BY [Year] DESC, [Month] DESC
-	;
-	GO
+	--SELECT distinct TOP 48 [Year], [Month]
+	--INTO #TNR_falls_tf
+	--FROM [DSSI].[dbo].[RHFallsVisibilityWall]	--is null need to get this data back again.
+	--ORDER BY [Year] DESC, [Month] DESC
+	--;
+	--GO
 
-	--identify types of harm
-	IF OBJECT_ID('tempdb.dbo.#TNR_falls_harmtypes') IS NOT NULL DROP TABLE #TNR_falls_harmtypes; 
-	GO
+	----identify types of harm
+	--IF OBJECT_ID('tempdb.dbo.#TNR_falls_harmtypes') IS NOT NULL DROP TABLE #TNR_falls_harmtypes; 
+	--GO
 
-	CREATE TABLE #TNR_falls_harmtypes ( HarmFlag varchar(25));
-	INSERT INTO #TNR_falls_harmtypes 	VALUES ('Degree of Harm (2-5)'),('No Harm (NA & 1)'); 
-	GO
+	--CREATE TABLE #TNR_falls_harmtypes ( HarmFlag varchar(25));
+	--INSERT INTO #TNR_falls_harmtypes 	VALUES ('Degree of Harm (2-5)'),('No Harm (NA & 1)'); 
+	--GO
 
-	--create place holder table to house falls
-	IF OBJECT_ID('tempdb.dbo.#TNR_falls_groupings') IS NOT NULL DROP TABLE #TNR_falls_groupings; 
-	GO
+	----create place holder table to house falls
+	--IF OBJECT_ID('tempdb.dbo.#TNR_falls_groupings') IS NOT NULL DROP TABLE #TNR_falls_groupings; 
+	--GO
 
-	SELECT T.*,P.*,H.* 	
-	INTO #TNR_falls_groupings
-	FROM #TNR_falls_tf as T
-	CROSS JOIN  	(SELECT distinct [Director Programs] as 'Program' FROM DSSI.[dbo].[RH_VisibilityWall_QPS_FallsProgramMap]) as P
-	CROSS JOIN  	(SELECT * FROM #TNR_falls_harmtypes ) as H
-	;
-	GO
+	--SELECT T.*,P.*,H.* 	
+	--INTO #TNR_falls_groupings
+	--FROM #TNR_falls_tf as T
+	--CROSS JOIN  	(SELECT distinct [Director Programs] as 'Program' FROM DSSI.[dbo].[RH_VisibilityWall_QPS_FallsProgramMap]) as P
+	--CROSS JOIN  	(SELECT * FROM #TNR_falls_harmtypes ) as H
+	--;
+	--GO
 	
-	--count number of falls resulting in harm or not harm by program
-	IF OBJECT_ID('tempdb.dbo.#TNR_falls') IS NOT NULL DROP TABLE #TNR_falls;
-	GO
+	----count number of falls resulting in harm or not harm by program
+	--IF OBJECT_ID('tempdb.dbo.#TNR_falls') IS NOT NULL DROP TABLE #TNR_falls;
+	--GO
 
-	SELECT M.[Director Programs] as 'Program'
-	,CASE WHEN F.[Degree of Harm] in ('1 - No harm', 'Not Applicable') then 'No Harm (NA & 1)' 
-		  ELSE 'Degree of Harm (2-5)' 
-	END as 'HarmFlag'
-	, [Year]
-	, [Month]
-	, COUNT(*) as 'NumFallsCases'
-	INTO #TNR_falls
-	FROM [DSSI].[dbo].[RHFallsVisibilityWall] as F
-	LEFT JOIN DSSI.[dbo].[RH_VisibilityWall_QPS_FallsProgramMap] as M
-	ON F.[Responsible Program]=M.[Falls Responsible Programs]
-	WHERE F.[Originated HSDA]='richmond'
-	GROUP BY M.[Director Programs]
-	,CASE WHEN F.[Degree of Harm] in ('1 - No harm','Not Applicable') then 'No Harm (NA & 1)' 
-		  ELSE 'Degree of Harm (2-5)' 
-	END
-	, [Year]
-	, [Month]
-	;
-	GO
+	--SELECT M.[Director Programs] as 'Program'
+	--,CASE WHEN F.[Degree of Harm] in ('1 - No harm', 'Not Applicable') then 'No Harm (NA & 1)' 
+	--	  ELSE 'Degree of Harm (2-5)' 
+	--END as 'HarmFlag'
+	--, [Year]
+	--, [Month]
+	--, COUNT(*) as 'NumFallsCases'
+	--INTO #TNR_falls
+	--FROM [DSSI].[dbo].[RHFallsVisibilityWall] as F
+	--LEFT JOIN DSSI.[dbo].[RH_VisibilityWall_QPS_FallsProgramMap] as M
+	--ON F.[Responsible Program]=M.[Falls Responsible Programs]
+	--WHERE F.[Originated HSDA]='richmond'
+	--GROUP BY M.[Director Programs]
+	--,CASE WHEN F.[Degree of Harm] in ('1 - No harm', 'Not Applicable') then 'No Harm (NA & 1)' 
+	--	  ELSE 'Degree of Harm (2-5)' 
+	--END
+	--, [Year]
+	--, [Month]
+	--;
+	--GO
 
-	--compute falls data set
-	IF OBJECT_ID('tempdb.dbo.#TNR_IDXX_Falls') is not null DROP TABLE #TNR_IDXX_Falls;
-	GO
+	----compute falls data set
+	--IF OBJECT_ID('tempdb.dbo.#TNR_IDXX_Falls') is not null DROP TABLE #TNR_IDXX_Falls;
+	--GO
 
-	--add harm
-	SELECT 
-	'Richmond' as 'Facility' 
-	, R.Program
-	, R.[Year]
-	, R.[Month]
-	, 'Degree of Harm (2-5)'  as 'HarmFlag'
-	, ISNULL(F.NumFallsCases,0) as 'Value'
-	INTO #TNR_IDXX_Falls
-	FROM #TNR_falls_groupings as R
-	LEFT JOIN #TNR_falls as F
-	ON R.[program]=F.[Program]
-	AND R.[HarmFlag]=F.[HarmFlag]
-	AND R.[Year] = F.[Year] 
-	AND R.[Month] = F.[Month]
-	WHERE R.HarmFlag='Degree of Harm (2-5)' 
-	-- add overall harm
-	UNION
-	SELECT
-	'Richmond' as 'Facility' 
-	, 'Overall' as 'Program'
-	, R.[Year]
-	, R.[Month]
-	, 'Degree of Harm (2-5)'  as 'HarmFlag'
-	, SUM(ISNULL(F.NumFallsCases,0)) as 'Value'
-	FROM (SELECT distinct [Year], [Month], [HarmFlag] FROM #TNR_falls_groupings WHERE [HarmFlag]='Degree of Harm (2-5)' ) as R	--just distinct years, months, and harm
-	LEFT JOIN #TNR_falls as F
-	ON R.[HarmFlag]=F.[HarmFlag]
-	AND R.[Year] = F.[Year] 
-	AND R.[Month] = F.[Month]
-	GROUP BY  R.[Year]
-	, R.[Month]
-	--add no harm
-	UNION
-	SELECT 'Richmond' as 'Facility' 
-	, R.Program
-	, R.[Year]
-	, R.[Month]
-	, 'No Harm (NA & 1)' as 'HarmFlag'
-	, ISNULL(F.NumFallsCases,0) as 'Value'
-	FROM #TNR_falls_groupings as R
-	LEFT JOIN #TNR_falls as F
-	ON R.[program]=F.[Program]
-	AND R.[HarmFlag]=F.[HarmFlag]
-	AND R.[Year] = F.[Year] 
-	AND R.[Month] = F.[Month]
-	WHERE R.HarmFlag='No Harm (NA & 1)'
-	-- add overall no harm
-	UNION
-	SELECT 'Richmond' as 'Facility' 
-	, 'Overall' as 'Program'
-	, R.[Year]
-	, R.[Month]
-	, 'No Harm (NA & 1)' as 'HarmFlag'
-	, SUM(ISNULL(F.NumFallsCases,0)) as 'Value'
-	FROM (SELECT distinct [Year], [Month], [HarmFlag] FROM #TNR_falls_groupings WHERE [HarmFlag]='No Harm (NA & 1)') as R	--just distinct years, months, and harm
-	LEFT JOIN #TNR_falls as F
-	ON R.[HarmFlag]=F.[HarmFlag]
-	AND R.[Year] = F.[Year] 
-	AND R.[Month] = F.[Month]
-	GROUP BY  R.[Year]
-	, R.[Month]
-	;
-	GO
+	----add harm
+	--SELECT 
+	--'Richmond' as 'Facility' 
+	--, R.Program
+	--, R.[Year]
+	--, R.[Month]
+	--, 'Degree of Harm (2-5)'  as 'HarmFlag'
+	--, ISNULL(F.NumFallsCases,0) as 'Value'
+	--INTO #TNR_IDXX_Falls
+	--FROM #TNR_falls_groupings as R
+	--LEFT JOIN #TNR_falls as F
+	--ON R.[program]=F.[Program]
+	--AND R.[HarmFlag]=F.[HarmFlag]
+	--AND R.[Year] = F.[Year] 
+	--AND R.[Month] = F.[Month]
+	--WHERE R.HarmFlag='Degree of Harm (2-5)' 
+	---- add overall harm
+	--UNION
+	--SELECT
+	--'Richmond' as 'Facility' 
+	--, 'Overall' as 'Program'
+	--, R.[Year]
+	--, R.[Month]
+	--, 'Degree of Harm (2-5)'  as 'HarmFlag'
+	--, SUM(ISNULL(F.NumFallsCases,0)) as 'Value'
+	--FROM (SELECT distinct [Year], [Month], [HarmFlag] FROM #TNR_falls_groupings WHERE [HarmFlag]='Degree of Harm (2-5)' ) as R	--just distinct years, months, and harm
+	--LEFT JOIN #TNR_falls as F
+	--ON R.[HarmFlag]=F.[HarmFlag]
+	--AND R.[Year] = F.[Year] 
+	--AND R.[Month] = F.[Month]
+	--GROUP BY  R.[Year]
+	--, R.[Month]
+	----add no harm
+	--UNION
+	--SELECT 'Richmond' as 'Facility' 
+	--, R.Program
+	--, R.[Year]
+	--, R.[Month]
+	--, 'No Harm (NA & 1)' as 'HarmFlag'
+	--, ISNULL(F.NumFallsCases,0) as 'Value'
+	--FROM #TNR_falls_groupings as R
+	--LEFT JOIN #TNR_falls as F
+	--ON R.[program]=F.[Program]
+	--AND R.[HarmFlag]=F.[HarmFlag]
+	--AND R.[Year] = F.[Year] 
+	--AND R.[Month] = F.[Month]
+	--WHERE R.HarmFlag='No Harm (NA & 1)'
+	---- add overall no harm
+	--UNION
+	--SELECT 'Richmond' as 'Facility' 
+	--, 'Overall' as 'Program'
+	--, R.[Year]
+	--, R.[Month]
+	--, 'No Harm (NA & 1)' as 'HarmFlag'
+	--, SUM(ISNULL(F.NumFallsCases,0)) as 'Value'
+	--FROM (SELECT distinct [Year], [Month], [HarmFlag] FROM #TNR_falls_groupings WHERE [HarmFlag]='No Harm (NA & 1)') as R	--just distinct years, months, and harm
+	--LEFT JOIN #TNR_falls as F
+	--ON R.[HarmFlag]=F.[HarmFlag]
+	--AND R.[Year] = F.[Year] 
+	--AND R.[Month] = F.[Month]
+	--GROUP BY  R.[Year]
+	--, R.[Month]
+	--;
+	--GO
 
-	--put data into a falls table
-	TRUNCATE TABLE DSSI.dbo.TRUE_NORTH_RICHMOND_FALLS; 
-	GO
+	----put data into a falls table
+	--TRUNCATE TABLE DSSI.dbo.TRUE_NORTH_RICHMOND_FALLS; 
+	--GO
 
-	INSERT INTO DSSI.dbo.TRUE_NORTH_RICHMOND_FALLS ( Facility, [Program], [year], [Month], [HarmFlag], [Value])
-	SELECT Facility, [Program], [year], [Month], [HarmFlag], [Value]
-	FROM #TNR_IDXX_Falls
-	;
-	GO
+	--INSERT INTO DSSI.dbo.TRUE_NORTH_RICHMOND_FALLS ( Facility, [Program], [year], [Month], [HarmFlag], [Value])
+	--SELECT Facility, [Program], [year], [Month], [HarmFlag], [Value]
+	--FROM #TNR_IDXX_Falls
+	--;
+	--GO
 
 -------------------------------
 -- Home Support (HS) Hours and % change from last year ID37 and ID38
